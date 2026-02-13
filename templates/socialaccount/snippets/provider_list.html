@@ -1,0 +1,32 @@
+{% load socialaccount %}
+
+<div class="social-providers">
+    <ul class="space-y-3">
+        {% for provider in socialaccount_providers %}
+        {% if provider.id == "microsoft" %}
+        <li>
+            <a title="{{provider.name}}"
+                class="social-btn w-full flex items-center justify-center space-x-3 bg-white text-dark-950 px-6 py-4 rounded-fluent font-bold transition-all"
+                href="{% provider_login_url provider.id process=process scope=scope auth_params=auth_params %}">
+                <svg class="w-5 h-5" viewBox="0 0 23 23" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="#f3f2f1" d="M1 1h21v21H1z" />
+                    <path fill="#f25022" d="M1 1h10v10H1z" />
+                    <path fill="#7fba00" d="M12 1h10v10H12z" />
+                    <path fill="#00a4ef" d="M1 12h10v10H1z" />
+                    <path fill="#ffb900" d="M12 12h10v10H12z" />
+                </svg>
+                <span>Authorize with {{provider.name}} Entra</span>
+            </a>
+        </li>
+        {% else %}
+        <li>
+            <a title="{{provider.name}}"
+                class="social-btn w-full flex items-center justify-center space-x-3 glass-dark border border-white/10 text-white px-6 py-4 rounded-fluent font-bold transition-all"
+                href="{% provider_login_url provider.id process=process scope=scope auth_params=auth_params %}">
+                <span>Sign in with {{provider.name}}</span>
+            </a>
+        </li>
+        {% endif %}
+        {% endfor %}
+    </ul>
+</div>
