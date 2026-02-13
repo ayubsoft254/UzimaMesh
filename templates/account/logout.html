@@ -1,0 +1,32 @@
+{% extends "account/base_entrance.html" %}
+{% load i18n %}
+
+{% block head_title %}{% trans "Sign Out" %}{% endblock %}
+{% block entrance_title %}{% trans "Node Termination" %}{% endblock %}
+{% block entrance_subtitle %}{% trans "End active session" %}{% endblock %}
+
+{% block inner_content %}
+<div class="text-center space-y-8">
+    <p class="text-sm text-neutral-400">
+        {% trans 'You are about to terminate your secure connection to Uzima Mesh. Are you sure you wish to proceed?' %}
+    </p>
+
+    <form method="post" action="{% url 'account_logout' %}">
+        {% csrf_token %}
+        {% if redirect_field_value %}
+        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}" />
+        {% endif %}
+
+        <div class="grid grid-cols-1 gap-4">
+            <button type="submit"
+                class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-fluent shadow-[0_0_15px_rgba(239,68,68,0.2)] transform transition-all active:scale-95 uppercase tracking-wider">
+                {% trans 'Terminate Session' %}
+            </button>
+            <a href="/"
+                class="w-full glass-dark border border-white/10 text-neutral-400 hover:text-white font-bold py-4 rounded-fluent transition-colors text-center uppercase tracking-wider text-sm">
+                {% trans 'Aborted' %}
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}
