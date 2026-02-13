@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - Uzima Mesh{% endblock %}
+{% block header_title %}Triage Coordination Center{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-white p-6 rounded-fluent shadow-fluent border-l-4 border-medical-500">
+            <p class="text-sm font-medium text-neutral-500 uppercase tracking-wider">Active Sessions</p>
+            <p class="text-3xl font-bold text-neutral-800 mt-1">{{ stats.active_sessions }}</p>
+            <p class="text-xs text-medical-600 mt-2">Currently in triage</p>
+        </div>
+
+        <div class="bg-white p-6 rounded-fluent shadow-fluent border-l-4 border-red-500">
+            <p class="text-sm font-medium text-neutral-500 uppercase tracking-wider">Critical Cases</p>
+            <p class="text-3xl font-bold text-neutral-800 mt-1">{{ stats.critical_cases }}</p>
+            <p class="text-xs text-red-600 mt-2">Score of 5 / Immediate action</p>
+        </div>
+
+        <div class="bg-white p-6 rounded-fluent shadow-fluent border-l-4 border-amber-500">
+            <p class="text-sm font-medium text-neutral-500 uppercase tracking-wider">Avg. Wait Time</p>
+            <p class="text-3xl font-bold text-neutral-800 mt-1">{{ stats.avg_wait_time }}m</p>
+            <p class="text-xs text-amber-600 mt-2">Target under 20m</p>
+        </div>
+    </div>
+
+    <!-- Triage Table Section -->
+    <div class="bg-white rounded-fluent shadow-fluent overflow-hidden border border-neutral-200">
+        <div class="px-6 py-4 border-b border-neutral-100 flex items-center justify-between">
+            <h3 class="font-semibold text-neutral-700">Recent Triage Sessions</h3>
+            <button class="text-xs text-medical-600 font-medium hover:underline">View All Patients</button>
+        </div>
+
+        <div id="triage-table-container">
+            {% include 'triage/partials/triage_table.html' %}
+        </div>
+    </div>
+</div>
+{% endblock %}
