@@ -1,0 +1,39 @@
+{% for session in sessions %}
+<tr class="hover:bg-neutral-50 transition-colors border-b border-neutral-100">
+    <td class="px-6 py-4 font-medium text-neutral-800">
+        {{ session.patient.first_name }} {{ session.patient.last_name }}
+    </td>
+    <td class="px-6 py-4 text-sm text-neutral-600 max-w-xs truncate">
+        {{ session.symptoms }}
+    </td>
+    <td class="px-6 py-4">
+        {% if session.urgency_score == 5 %}
+        <span class="px-2 py-1 bg-red-100 text-red-700 text-[10px] font-bold rounded uppercase">
+            Critical (5)
+        </span>
+        {% elif session.urgency_score >= 3 %}
+        <span class="px-2 py-1 bg-amber-100 text-amber-700 text-[10px] font-bold rounded uppercase">
+            Urgent ({{ session.urgency_score }})
+        </span>
+        {% else %}
+        <span class="px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold rounded uppercase">
+            Stable ({{ session.urgency_score }})
+        </span>
+        {% endif %}
+    </td>
+    <td class="px-6 py-4">
+        <div class="flex items-center space-x-2">
+            <span class="w-2 h-2 rounded-full 
+                {% if session.status == 'COMPLETED' %}bg-green-500
+                {% elif session.status == 'IN_PROGRESS' %}bg-medical-500
+                {% else %}bg-neutral-400{% endif %}"></span>
+            <span class="text-xs font-medium text-neutral-700">{{ session.get_status_display }}</span>
+        </div>
+    </td>
+    <td class="px-6 py-4 text-xs text-neutral-500 italic">{{ session.created_at|timesince }} ago</td>
+</tr>
+{% empty %}
+<tr>
+    <td colspan="5" class="px-6 py-12 text-center text-neutral-500 italic">No active triage sessions.</td>
+</tr>
+{% endfor %}

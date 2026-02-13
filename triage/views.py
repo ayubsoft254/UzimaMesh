@@ -15,9 +15,9 @@ def dashboard(request):
     return render(request, 'triage/dashboard.html', {'stats': stats, 'sessions': sessions})
 
 def triage_updates(request):
-    # Partial update for HTMX
+    # Partial update for HTMX - render only rows
     sessions = TriageSession.objects.all()[:10]
-    return render(request, 'triage/partials/triage_table.html', {'sessions': sessions})
+    return render(request, 'triage/partials/triage_rows.html', {'sessions': sessions})
 
 class PatientViewSet(viewsets.ModelViewSet):
     queryset = Patient.objects.all()
