@@ -174,10 +174,10 @@ LOGOUT_REDIRECT_URL = '/'
 SOCIALACCOUNT_PROVIDERS = {
     "microsoft": {
         "APPS": [{
-            "client_id": os.getenv("AZURE_CLIENT_ID"),
-            "secret": os.getenv("AZURE_CLIENT_SECRET"),
+            "client_id": os.getenv("AZURE_CLIENT_ID", ""),
+            "secret": os.getenv("AZURE_CLIENT_SECRET", ""),
             "settings": {
-                "tenant": "common",
+                "tenant": os.getenv("AZURE_TENANT_ID", "common"),
                 "login_url": "https://login.microsoftonline.com",
                 "graph_url": "https://graph.microsoft.com",
             }
