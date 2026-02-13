@@ -46,10 +46,8 @@
     <td class="px-8 py-5">
         <div class="flex items-center space-x-3">
             <div class="flex -space-x-1">
-                <span class="w-1.5 h-4 rounded-full 
-                    {% if session.status == 'COMPLETED' %}bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]
-                    {% elif session.status == 'IN_PROGRESS' %}bg-mesh-500 shadow-neon
-                    {% else %}bg-neutral-700{% endif %}"></span>
+                <span
+                    class="w-1.5 h-4 rounded-full {% if session.status == 'COMPLETED' %}bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]{% elif session.status == 'IN_PROGRESS' %}bg-mesh-500 shadow-neon{% else %}bg-neutral-700{% endif %}"></span>
             </div>
             <span class="text-[11px] font-bold text-neutral-300 uppercase tracking-widest">{{ session.get_status_display
                 }}</span>
