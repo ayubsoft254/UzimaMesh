@@ -1,0 +1,381 @@
+{% extends 'base.html' %}
+
+{% block title %}Triage Intake - Uzima Mesh{% endblock %}
+{% block header_title %}Intake Interview{% endblock %}
+
+{% block extra_head %}
+<style>
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 220px);
+    }
+
+    @media (min-width: 1024px) {
+        .chat-container {
+            height: calc(100vh - 140px);
+        }
+    }
+
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        scroll-behavior: smooth;
+    }
+
+    .msg-agent {
+        animation: slideInLeft 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .msg-patient {
+        animation: slideInRight 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @keyframes slideInLeft {
+        from {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    @keyframes slideInRight {
+        from {
+            opacity: 0;
+            transform: translateX(20px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    .typing-dots span {
+        animation: typingBounce 1.4s infinite ease-in-out both;
+    }
+
+    .typing-dots span:nth-child(1) {
+        animation-delay: 0s;
+    }
+
+    .typing-dots span:nth-child(2) {
+        animation-delay: 0.2s;
+    }
+
+    .typing-dots span:nth-child(3) {
+        animation-delay: 0.4s;
+    }
+
+    @keyframes typingBounce {
+
+        0%,
+        80%,
+        100% {
+            transform: scale(0.6);
+            opacity: 0.4;
+        }
+
+        40% {
+            transform: scale(1);
+            opacity: 1;
+        }
+    }
+
+    .pulse-ring {
+        animation: pulseRing 2s ease-in-out infinite;
+    }
+
+    @keyframes pulseRing {
+        0% {
+            box-shadow: 0 0 0 0 rgba(0, 120, 212, 0.4);
+        }
+
+        70% {
+            box-shadow: 0 0 0 10px rgba(0, 120, 212, 0);
+        }
+
+        100% {
+            box-shadow: 0 0 0 0 rgba(0, 120, 212, 0);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-container max-w-3xl mx-auto">
+    <!-- Connection Status -->
+    <div class="flex items-center justify-center space-x-3 py-4 mb-4">
+        <div class="pulse-ring w-2.5 h-2.5 rounded-full bg-mesh-500"></div>
+        <span class="text-[10px] font-bold text-mesh-500/70 uppercase tracking-[0.2em]">
+            Secure Connection Established
+        </span>
+    </div>
+
+    <!-- Chat Messages Area -->
+    <div id="chat-messages" class="chat-messages space-y-6 px-2 pb-6">
+        <!-- Initial agent greeting will be injected by JS -->
+    </div>
+
+    <!-- Typing Indicator -->
+    <div id="typing-indicator" class="hidden px-6 py-3">
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-full bg-mesh-500/20 border border-mesh-500/30 flex items-center justify-center">
+                <svg class="w-4 h-4 text-mesh-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
+                    </path>
+                </svg>
+            </div>
+            <div class="glass px-4 py-3 rounded-2xl rounded-bl-md">
+                <div class="typing-dots flex space-x-1.5">
+                    <span class="w-2 h-2 rounded-full bg-mesh-500"></span>
+                    <span class="w-2 h-2 rounded-full bg-mesh-500"></span>
+                    <span class="w-2 h-2 rounded-full bg-mesh-500"></span>
+                </div>
+            </div>
+            <span class="text-[9px] text-neutral-600 uppercase tracking-widest font-bold">Analyzing...</span>
+        </div>
+    </div>
+
+    <!-- Urgency Result Card (hidden until interview complete) -->
+    <div id="urgency-card" class="hidden mx-4 mb-4"></div>
+
+    <!-- Input Bar -->
+    <div id="input-bar" class="glass border-t border-white/5 p-4 mt-auto">
+        <div class="flex items-center space-x-3">
+            <input id="chat-input" type="text" placeholder="Type your response..."
+                class="flex-1 bg-white/5 border border-white/10 rounded-full px-6 py-3.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:ring-2 focus:ring-mesh-500/50 focus:border-mesh-500/50 transition-all"
+                autocomplete="off">
+            <button id="send-btn" onclick="sendMessage()"
+                class="w-12 h-12 bg-mesh-500 hover:bg-mesh-600 rounded-full flex items-center justify-center text-white shadow-neon transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-btn');
+    const typingIndicator = document.getElementById('typing-indicator');
+    const urgencyCard = document.getElementById('urgency-card');
+    const inputBar = document.getElementById('input-bar');
+
+    let conversationStep = 0;
+    let patientData = { name: '', symptoms: '', duration: '', severity: '' };
+
+    // Scripted conversation flow
+    const agentFlow = [
+        {
+            message: "Hello, I'm your Uzima Mesh Intake Coordinator. I'm here to help assess your condition and connect you with the right care. Can I start with your name?",
+            field: 'name'
+        },
+        {
+            message: "Thank you, {name}. I understand you may not be feeling well. Can you describe what symptoms you're experiencing? Please be as specific as possible.",
+            field: 'symptoms'
+        },
+        {
+            message: "I see. And how long have you been experiencing these symptoms?",
+            field: 'duration'
+        },
+        {
+            message: "On a scale of 1-10, how would you rate the intensity of your discomfort right now?",
+            field: 'severity'
+        }
+    ];
+
+    function addMessage(content, role) {
+        const isAgent = role === 'agent';
+        const wrapper = document.createElement('div');
+        wrapper.className = `flex ${isAgent ? 'justify-start msg-agent' : 'justify-end msg-patient'}`;
+
+        if (isAgent) {
+            wrapper.innerHTML = `
+                <div class="flex items-start space-x-3 max-w-[85%]">
+                    <div class="w-8 h-8 rounded-full bg-mesh-500/20 border border-mesh-500/30 flex items-center justify-center flex-shrink-0 mt-1">
+                        <svg class="w-4 h-4 text-mesh-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-mesh-500/60 font-bold uppercase tracking-widest mb-1">Intake Agent</p>
+                        <div class="glass px-5 py-3.5 rounded-2xl rounded-bl-md">
+                            <p class="text-sm text-neutral-200 leading-relaxed">${content}</p>
+                        </div>
+                    </div>
+                </div>`;
+        } else {
+            wrapper.innerHTML = `
+                <div class="max-w-[85%]">
+                    <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest mb-1 text-right">You</p>
+                    <div class="bg-mesh-500/20 border border-mesh-500/20 px-5 py-3.5 rounded-2xl rounded-br-md">
+                        <p class="text-sm text-white leading-relaxed">${content}</p>
+                    </div>
+                </div>`;
+        }
+
+        chatMessages.appendChild(wrapper);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function showTyping() {
+        typingIndicator.classList.remove('hidden');
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        sendBtn.disabled = true;
+        chatInput.disabled = true;
+    }
+
+    function hideTyping() {
+        typingIndicator.classList.add('hidden');
+        sendBtn.disabled = false;
+        chatInput.disabled = false;
+        chatInput.focus();
+    }
+
+    function generateUrgency() {
+        const severity = parseInt(patientData.severity) || 3;
+        let urgencyLevel, urgencyColor, urgencyBg, urgencyBorder, action, score;
+
+        if (severity >= 8) {
+            urgencyLevel = 'Critical Priority';
+            urgencyColor = 'text-red-400';
+            urgencyBg = 'bg-red-500/10';
+            urgencyBorder = 'border-red-500/30';
+            action = 'Please stay on the line. A doctor is being notified immediately and will attend to you shortly.';
+            score = 5;
+        } else if (severity >= 5) {
+            urgencyLevel = 'High Priority';
+            urgencyColor = 'text-amber-400';
+            urgencyBg = 'bg-amber-500/10';
+            urgencyBorder = 'border-amber-500/30';
+            action = 'Your case has been flagged as urgent. A medical professional will review your case within the next 15 minutes.';
+            score = 3;
+        } else {
+            urgencyLevel = 'Routine Care';
+            urgencyColor = 'text-green-400';
+            urgencyBg = 'bg-green-500/10';
+            urgencyBorder = 'border-green-500/30';
+            action = 'Your appointment has been scheduled. You will receive a confirmation with the time and details shortly.';
+            score = 1;
+        }
+
+        // Show urgency card
+        urgencyCard.classList.remove('hidden');
+        urgencyCard.innerHTML = `
+            <div class="${urgencyBg} border ${urgencyBorder} rounded-2xl p-8 space-y-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-[9px] ${urgencyColor} font-bold uppercase tracking-[0.2em]">Assessment Complete</p>
+                        <h3 class="text-xl font-bold text-white mt-1">${urgencyLevel}</h3>
+                    </div>
+                    <div class="w-14 h-14 rounded-2xl ${urgencyBg} border ${urgencyBorder} flex items-center justify-center">
+                        <span class="text-2xl font-bold ${urgencyColor}">${score}</span>
+                    </div>
+                </div>
+                <div class="border-t border-white/5 pt-4">
+                    <p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mb-2">Recommended Action</p>
+                    <p class="text-sm text-neutral-300 leading-relaxed">${action}</p>
+                </div>
+                <div class="border-t border-white/5 pt-4 grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-[9px] text-neutral-600 font-bold uppercase tracking-widest">Patient</p>
+                        <p class="text-sm text-white font-semibold mt-1">${patientData.name}</p>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-neutral-600 font-bold uppercase tracking-widest">Duration</p>
+                        <p class="text-sm text-white font-semibold mt-1">${patientData.duration}</p>
+                    </div>
+                    <div class="col-span-2">
+                        <p class="text-[9px] text-neutral-600 font-bold uppercase tracking-widest">Primary Symptoms</p>
+                        <p class="text-sm text-white font-semibold mt-1">${patientData.symptoms}</p>
+                    </div>
+                </div>
+                <a href="/" class="block w-full text-center bg-mesh-500 hover:bg-mesh-600 text-white font-bold py-3.5 rounded-fluent shadow-neon transition-all uppercase tracking-wider text-xs">
+                    Return to Dashboard
+                </a>
+            </div>`;
+
+        // Submit to backend
+        fetch('/intake/submit/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
+                    document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
+            },
+            body: JSON.stringify({
+                name: patientData.name,
+                symptoms: patientData.symptoms,
+                duration: patientData.duration,
+                severity: severity,
+                urgency_score: score
+            })
+        }).catch(() => { });  // Fire and forget
+    }
+
+    function sendMessage() {
+        const text = chatInput.value.trim();
+        if (!text || conversationStep > agentFlow.length) return;
+
+        addMessage(text, 'patient');
+        chatInput.value = '';
+
+        // Store patient data
+        const currentField = agentFlow[conversationStep - 1]?.field;
+        if (currentField) {
+            patientData[currentField] = text;
+        }
+
+        if (conversationStep >= agentFlow.length) {
+            // Interview complete
+            patientData['severity'] = text;
+            showTyping();
+            setTimeout(() => {
+                hideTyping();
+                addMessage(
+                    `Thank you for sharing that, ${patientData.name}. I've completed my initial assessment. Here's your triage summary:`,
+                    'agent'
+                );
+                setTimeout(() => generateUrgency(), 800);
+                inputBar.classList.add('hidden');
+            }, 2000);
+            return;
+        }
+
+        showTyping();
+        setTimeout(() => {
+            hideTyping();
+            let msg = agentFlow[conversationStep].message;
+            msg = msg.replace('{name}', patientData.name || 'there');
+            addMessage(msg, 'agent');
+            conversationStep++;
+        }, 1200 + Math.random() * 800);
+    }
+
+    // Enter key handler
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    // Start conversation
+    setTimeout(() => {
+        addMessage(agentFlow[0].message, 'agent');
+        conversationStep = 1;
+        chatInput.focus();
+    }, 600);
+</script>
+{% endblock %}
