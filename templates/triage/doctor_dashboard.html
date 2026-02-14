@@ -1,0 +1,155 @@
+{% extends 'base.html' %}
+
+{% block title %}Command Center - Uzima Mesh{% endblock %}
+{% block header_title %}Command Center{% endblock %}
+
+{% block extra_head %}
+<style>
+    .urgency-pulse-critical {
+        animation: urgencyPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes urgencyPulse {
+
+        0%,
+        100% {
+            opacity: 1;
+        }
+
+        50% {
+            opacity: 0.6;
+        }
+    }
+
+    .row-expand {
+        animation: expandIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @keyframes expandIn {
+        from {
+            opacity: 0;
+            max-height: 0;
+        }
+
+        to {
+            opacity: 1;
+            max-height: 500px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-10">
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- Active Sessions -->
+        <div
+            class="glass p-6 rounded-2xl shadow-glass group hover:shadow-neon transition-all duration-500 relative overflow-hidden">
+            <div
+                class="absolute -top-4 -right-4 w-20 h-20 bg-mesh-500/5 rounded-full group-hover:bg-mesh-500/10 transition-colors">
+            </div>
+            <p class="text-[9px] font-bold text-mesh-500 uppercase tracking-[0.2em]">Active Ops</p>
+            <p class="text-3xl font-bold text-white mt-2">{{ stats.active_sessions }}</p>
+            <div class="mt-3 flex items-center space-x-2">
+                <div class="w-1.5 h-1.5 rounded-full bg-mesh-500 animate-pulse"></div>
+                <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Live</p>
+            </div>
+        </div>
+
+        <!-- Critical Cases -->
+        <div
+            class="glass p-6 rounded-2xl shadow-glass group hover:shadow-[0_0_20px_rgba(239,68,68,0.2)] transition-all duration-500 border-l-2 border-red-500/30 relative overflow-hidden">
+            <div
+                class="absolute -top-4 -right-4 w-20 h-20 bg-red-500/5 rounded-full group-hover:bg-red-500/10 transition-colors">
+            </div>
+            <p class="text-[9px] font-bold text-red-500 uppercase tracking-[0.2em]">Critical</p>
+            <p class="text-3xl font-bold text-white mt-2">{{ stats.critical_cases }}</p>
+            <div class="mt-3">
+                <span
+                    class="text-[8px] text-red-500 font-bold uppercase tracking-wider bg-red-500/10 px-2 py-0.5 rounded">Requires
+                    Attention</span>
+            </div>
+        </div>
+
+        <!-- Pending Queue -->
+        <div
+            class="glass p-6 rounded-2xl shadow-glass group hover:shadow-[0_0_20px_rgba(245,158,11,0.2)] transition-all duration-500 relative overflow-hidden">
+            <div
+                class="absolute -top-4 -right-4 w-20 h-20 bg-amber-500/5 rounded-full group-hover:bg-amber-500/10 transition-colors">
+            </div>
+            <p class="text-[9px] font-bold text-amber-500 uppercase tracking-[0.2em]">In Queue</p>
+            <p class="text-3xl font-bold text-white mt-2">{{ stats.pending_cases }}</p>
+            <div class="mt-3 flex items-center space-x-2">
+                <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Awaiting Triage</p>
+            </div>
+        </div>
+
+        <!-- Avg Wait -->
+        <div
+            class="glass p-6 rounded-2xl shadow-glass group hover:shadow-[0_0_20px_rgba(34,197,94,0.2)] transition-all duration-500 relative overflow-hidden">
+            <div
+                class="absolute -top-4 -right-4 w-20 h-20 bg-green-500/5 rounded-full group-hover:bg-green-500/10 transition-colors">
+            </div>
+            <p class="text-[9px] font-bold text-green-500 uppercase tracking-[0.2em]">Efficiency</p>
+            <p class="text-3xl font-bold text-white mt-2">{{ stats.avg_wait_time }}<span
+                    class="text-lg text-neutral-500 ml-1">min</span></p>
+            <div class="mt-3 flex items-center space-x-2">
+                <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Avg Response</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Priority Queue -->
+    <div class="glass rounded-2xl shadow-glass overflow-hidden border border-white/5">
+        <div class="px-8 py-5 border-b border-white/5 flex items-center justify-between glass-dark">
+            <div class="flex items-center space-x-3">
+                <div class="w-2 h-6 bg-mesh-500 rounded-full"></div>
+                <h3 class="font-bold text-white tracking-tight">Priority Triage Queue</h3>
+                <span
+                    class="text-[8px] font-bold text-neutral-500 uppercase tracking-widest bg-white/5 px-2 py-0.5 rounded">
+                    Auto-Sorted
+                </span>
+            </div>
+            <div class="flex items-center space-x-3">
+                <button onclick="htmx.trigger('#queue-body', 'refresh')"
+                    class="text-[9px] font-bold text-mesh-500 hover:text-white transition-colors uppercase tracking-widest bg-mesh-500/10 hover:bg-mesh-500 px-4 py-2 rounded-full border border-mesh-500/20">
+                    Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- Queue Table -->
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-white/5">
+                        <th class="px-6 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
+                            Priority</th>
+                        <th class="px-6 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
+                            Patient</th>
+                        <th
+                            class="px-6 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest hidden md:table-cell">
+                            AI Summary</th>
+                        <th class="px-6 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
+                            Status</th>
+                        <th
+                            class="px-6 py-4 text-right text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
+                            Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="queue-body" hx-get="/doctor/queue/" hx-trigger="every 10s, refresh" hx-swap="innerHTML">
+                    {% include 'triage/partials/doctor_queue_rows.html' %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if not sessions %}
+        <div class="p-16 text-center">
+            <p class="text-neutral-600 text-sm font-bold uppercase tracking-widest">No active sessions</p>
+            <p class="text-neutral-700 text-xs mt-2">New patient intakes will appear here automatically</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

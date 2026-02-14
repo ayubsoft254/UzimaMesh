@@ -1,0 +1,141 @@
+{% for session in sessions %}
+<tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors group" id="session-row-{{ session.id }}">
+    <!-- Priority Indicator -->
+    <td class="px-6 py-4">
+        {% if session.urgency_score >= 4 %}
+        <div class="flex items-center space-x-2">
+            <div class="w-3 h-3 rounded-full bg-red-500 urgency-pulse-critical shadow-[0_0_8px_rgba(239,68,68,0.6)]">
+            </div>
+            <span class="text-[9px] font-bold text-red-400 uppercase tracking-widest">Critical</span>
+        </div>
+        {% elif session.urgency_score >= 3 %}
+        <div class="flex items-center space-x-2">
+            <div class="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]"></div>
+            <span class="text-[9px] font-bold text-amber-400 uppercase tracking-widest">Urgent</span>
+        </div>
+        {% else %}
+        <div class="flex items-center space-x-2">
+            <div class="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]"></div>
+            <span class="text-[9px] font-bold text-green-400 uppercase tracking-widest">Routine</span>
+        </div>
+        {% endif %}
+    </td>
+
+    <!-- Patient Info -->
+    <td class="px-6 py-4">
+        <div>
+            <p class="text-sm font-semibold text-white">{{ session.patient.first_name }} {{ session.patient.last_name }}
+            </p>
+            <p class="text-[10px] text-neutral-500 mt-0.5">{{ session.created_at|timesince }} ago</p>
+        </div>
+    </td>
+
+    <!-- AI Summary (expandable) -->
+    <td class="px-6 py-4 hidden md:table-cell max-w-xs">
+        {% if session.ai_summary %}
+        <button onclick="toggleSummary({{ session.id }})" class="text-left w-full">
+            <div id="summary-preview-{{ session.id }}"
+                class="text-[11px] text-neutral-400 line-clamp-2 hover:text-neutral-200 transition-colors cursor-pointer">
+                {{ session.ai_summary|linebreaksbr }}
+            </div>
+        </button>
+        {% else %}
+        <span class="text-[10px] text-neutral-600 italic">No AI summary</span>
+        {% endif %}
+    </td>
+
+    <!-- Status -->
+    <td class="px-6 py-4">
+        {% if session.status == 'PENDING' %}
+        <span
+            class="text-[8px] font-bold uppercase tracking-widest bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-full border border-amber-500/20">Pending</span>
+        {% elif session.status == 'IN_PROGRESS' %}
+        <span
+            class="text-[8px] font-bold uppercase tracking-widest bg-mesh-500/10 text-mesh-500 px-2.5 py-1 rounded-full border border-mesh-500/20">In
+            Progress</span>
+        {% elif session.status == 'COMPLETED' %}
+        <span
+            class="text-[8px] font-bold uppercase tracking-widest bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full border border-green-500/20">Completed</span>
+        {% else %}
+        <span
+            class="text-[8px] font-bold uppercase tracking-widest bg-neutral-500/10 text-neutral-400 px-2.5 py-1 rounded-full border border-neutral-500/20">{{
+            session.status }}</span>
+        {% endif %}
+    </td>
+
+    <!-- Action Buttons -->
+    <td class="px-6 py-4 text-right">
+        <div class="flex items-center justify-end space-x-2 opacity-60 group-hover:opacity-100 transition-opacity">
+            {% if session.status == 'PENDING' %}
+            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="accept">
+                <button type="submit"
+                    class="text-[8px] font-bold uppercase tracking-wider bg-mesh-500/10 hover:bg-mesh-500 text-mesh-500 hover:text-white px-3 py-1.5 rounded-full border border-mesh-500/20 transition-all">
+                    Accept
+                </button>
+            </form>
+            {% endif %}
+            {% if session.status != 'COMPLETED' %}
+            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="request_vitals">
+                <button type="submit"
+                    class="text-[8px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white px-3 py-1.5 rounded-full border border-white/10 transition-all">
+                    Vitals
+                </button>
+            </form>
+            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="escalate">
+                <button type="submit"
+                    class="text-[8px] font-bold uppercase tracking-wider bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white px-3 py-1.5 rounded-full border border-red-500/20 transition-all">
+                    Escalate
+                </button>
+            </form>
+            {% endif %}
+            {% if session.status == 'IN_PROGRESS' %}
+            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="complete">
+                <button type="submit"
+                    class="text-[8px] font-bold uppercase tracking-wider bg-green-500/10 hover:bg-green-500 text-green-400 hover:text-white px-3 py-1.5 rounded-full border border-green-500/20 transition-all">
+                    Complete
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </td>
+</tr>
+
+<!-- Expandable AI Detail Row -->
+<tr id="summary-detail-{{ session.id }}" class="hidden border-b border-white/5">
+    <td colspan="5" class="px-6 py-4 bg-white/[0.01]">
+        <div class="row-expand grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl">
+            <div class="md:col-span-2">
+                <p class="text-[9px] font-bold text-mesh-500 uppercase tracking-[0.2em] mb-2">AI CliffNotes</p>
+                <div class="text-xs text-neutral-300 leading-relaxed space-y-1 whitespace-pre-line">{{
+                    session.ai_summary }}</div>
+            </div>
+            <div>
+                <p class="text-[9px] font-bold text-amber-500 uppercase tracking-[0.2em] mb-2">Recommendation</p>
+                <p class="text-xs text-neutral-300 leading-relaxed">{{ session.recommended_action|default:"No
+                    recommendation" }}</p>
+                <p class="text-[9px] font-bold text-neutral-600 uppercase tracking-[0.2em] mt-4 mb-1">Symptoms</p>
+                <p class="text-xs text-neutral-400">{{ session.symptoms }}</p>
+            </div>
+        </div>
+    </td>
+</tr>
+{% empty %}
+<tr>
+    <td colspan="5" class="px-6 py-12 text-center text-neutral-600 text-sm">No sessions in queue</td>
+</tr>
+{% endfor %}
+
+<script>
+    function toggleSummary(id) {
+        const row = document.getElementById('summary-detail-' + id);
+        if (row) row.classList.toggle('hidden');
+    }
+</script>
