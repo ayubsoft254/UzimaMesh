@@ -7,8 +7,9 @@
                 {{ session.patient.first_name|first }}{{ session.patient.last_name|first }}
             </div>
             <div>
-                <p class="text-sm font-bold text-white tracking-tight">{{ session.patient.first_name }} {{
-                    session.patient.last_name }}</p>
+                <p class="text-sm font-bold text-white tracking-tight">
+                    {{ session.patient.first_name }} {{ session.patient.last_name }}
+                </p>
                 <p class="text-[10px] text-neutral-600 font-mono tracking-tighter uppercase">
                     PNL-{% if session.id < 10 %}0{% endif %}{{ session.id }} </p>
             </div>
@@ -24,22 +25,25 @@
         <div class="flex items-center space-x-2">
             <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
             <span
-                class="px-2 py-0.5 bg-red-500/10 text-red-500 text-[9px] font-bold rounded border border-red-500/20 uppercase tracking-widest">Critical
-                Level 5</span>
+                class="px-2 py-0.5 bg-red-500/10 text-red-500 text-[9px] font-bold rounded border border-red-500/20 uppercase tracking-widest">
+                Critical Level 5
+            </span>
         </div>
         {% elif session.urgency_score >= 3 %}
         <div class="flex items-center space-x-2">
             <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
             <span
-                class="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[9px] font-bold rounded border border-amber-500/20 uppercase tracking-widest">Urgent
-                Level {{ session.urgency_score }}</span>
+                class="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[9px] font-bold rounded border border-amber-500/20 uppercase tracking-widest">
+                Urgent Level {{ session.urgency_score }}
+            </span>
         </div>
         {% else %}
         <div class="flex items-center space-x-2">
             <span class="w-1.5 h-1.5 rounded-full bg-mesh-500"></span>
             <span
-                class="px-2 py-0.5 bg-mesh-500/10 text-mesh-500 text-[9px] font-bold rounded border border-mesh-500/20 uppercase tracking-widest">Stable
-                Level {{ session.urgency_score }}</span>
+                class="px-2 py-0.5 bg-mesh-500/10 text-mesh-500 text-[9px] font-bold rounded border border-mesh-500/20 uppercase tracking-widest">
+                Stable Level {{ session.urgency_score }}
+            </span>
         </div>
         {% endif %}
     </td>
@@ -55,8 +59,9 @@
         </div>
     </td>
     <td class="px-8 py-5 text-right">
-        <p class="text-[10px] font-mono text-neutral-600 uppercase tracking-tighter">{{ session.created_at|timesince }}
-            ago</p>
+        <p class="text-[10px] font-mono text-neutral-600 uppercase tracking-tighter">
+            {{ session.created_at|timesince }} ago
+        </p>
         <p class="text-[9px] text-mesh-500/50 font-bold uppercase tracking-widest">Active Link</p>
     </td>
 </tr>

@@ -15,9 +15,8 @@
 
 <div class="relative flex py-6 items-center">
     <div class="flex-grow border-t border-white/5"></div>
-    <span class="flex-shrink mx-4 text-[10px] font-bold text-neutral-600 uppercase tracking-widest">
-        Protocol Fallback
-    </span>
+    <span class="flex-shrink mx-4 text-[10px] font-bold text-neutral-600 uppercase tracking-widest">Protocol
+        Fallback</span>
     <div class="flex-grow border-t border-white/5"></div>
 </div>
 {% endif %}
@@ -50,14 +49,11 @@
     <div class="flex items-center justify-between">
         <div class="flex items-center">
             {{ form.remember }}
-            <label for="{{ form.remember.id_for_label }}" class="ml-2 !mb-0 text-xs cursor-pointer">
-                {% trans "Remember" %}
-            </label>
+            <label for="{{ form.remember.id_for_label }}" class="ml-2 !mb-0 text-xs cursor-pointer">{% trans "Remember"
+                %}</label>
         </div>
         <a href="{% url 'account_reset_password' %}"
-            class="text-xs font-bold text-mesh-500 hover:text-white transition-colors">
-            {% trans "Forgot Token?" %}
-        </a>
+            class="text-xs font-bold text-mesh-500 hover:text-white transition-colors">{% trans "Forgot Token?" %}</a>
     </div>
 
     <button
