@@ -11,7 +11,8 @@ urlpatterns = [
     # Main dashboard (redirects to doctor view)
     path('', views.dashboard, name='dashboard'),
 
-    # Patient Intake
+    # Patient Portal
+    path('patient/', views.patient_dashboard, name='patient_dashboard'),
     path('intake/', views.patient_intake, name='patient_intake'),
     path('intake/submit/', views.patient_intake_submit, name='patient_intake_submit'),
 
@@ -19,6 +20,9 @@ urlpatterns = [
     path('doctor/', views.doctor_dashboard, name='doctor_dashboard'),
     path('doctor/queue/', views.doctor_queue_updates, name='doctor_queue_updates'),
     path('doctor/action/<int:session_id>/', views.doctor_action, name='doctor_action'),
+
+    # Admin Dashboard
+    path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
 
     # HTMX partials
     path('api/triage/updates/', views.triage_updates, name='triage_updates'),

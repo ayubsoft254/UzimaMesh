@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.decorators import login_required
 from rest_framework import viewsets, permissions
 from .models import Patient, Doctor, TriageSession, ChatMessage
 from .serializers import PatientSerializer, DoctorSerializer, TriageSessionSerializer
@@ -12,23 +13,55 @@ import json
 # Existing Dashboard (now Doctor Command Center)
 # ──────────────────────────────────────────────
 
+@login_required
 def dashboard(request):
-    stats = {
-        'active_sessions': TriageSession.objects.filter(
-            status='IN_PROGRESS'
-        ).count(),
-        'critical_cases': TriageSession.objects.filter(
-            urgency_score__gte=4,
-            status__in=['PENDING', 'IN_PROGRESS'],
-        ).count(),
-        'avg_wait_time': 15,
-    }
-    sessions = TriageSession.objects.select_related(
-        'patient', 'doctor'
-    ).all()[:10]
-    return render(request, 'triage/dashboard.html', {
-        'stats': stats,
+    """
+    Role-based router for the main dashboard.
+    Redirects users based on their profile type or superuser status.
+    """
+    if request.user.is_superuser:
+        return redirect('admin_dashboard')
+    elif hasattr(request.user, 'doctor_profile'):
+        return redirect('doctor_dashboard')
+    elif hasattr(request.user, 'patient_profile'):
+        return redirect('patient_dashboard')
+    
+    # Default fallback to intake if no profile is found
+    return redirect('patient_intake')
+
+
+@login_required
+def patient_dashboard(request):
+    """Render the patient-specific portal."""
+    patient = getattr(request.user, 'patient_profile', None)
+    sessions = []
+    if patient:
+        sessions = TriageSession.objects.filter(patient=patient).order_by('-created_at')
+    
+    return render(request, 'triage/patient_dashboard.html', {
+        'patient': patient,
         'sessions': sessions,
+    })
+
+
+@login_required
+def admin_dashboard(request):
+    """Render the high-level system administrator dashboard."""
+    if not request.user.is_superuser:
+        return redirect('dashboard')
+        
+    stats = {
+        'total_patients': Patient.objects.count(),
+        'active_doctors': Doctor.objects.filter(is_available=True).count(),
+        'total_sessions': TriageSession.objects.count(),
+        'pending_triage': TriageSession.objects.filter(status='PENDING').count(),
+    }
+    
+    recent_sessions = TriageSession.objects.select_related('patient', 'doctor').all()[:15]
+    
+    return render(request, 'triage/admin_dashboard.html', {
+        'stats': stats,
+        'recent_sessions': recent_sessions,
     })
 
 
