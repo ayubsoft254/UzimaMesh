@@ -138,6 +138,7 @@
         </div>
 
         <!-- Side Navigation -->
+        {% if user.is_authenticated %}
         <nav id="sidebar"
             class="fixed inset-y-0 left-0 w-72 glass-dark border-r border-white/5 flex flex-col z-50 transform -translate-x-full lg:translate-x-0 lg:static lg:inset-auto transition-transform duration-300 ease-in-out">
             <div class="p-8 border-b border-white/5 flex items-center space-x-4">
@@ -240,19 +241,21 @@
                 {% endif %}
             </div>
         </nav>
+        {% endif %}
 
         <!-- Main Content -->
-        <main class="flex-1 overflow-y-auto pt-16 lg:pt-0">
+        <main class="flex-1 overflow-y-auto pt-16 lg:pt-0 {% if not user.is_authenticated %}w-full{% endif %}">
             <header
                 class="h-20 lg:h-24 px-8 flex items-center justify-between glass border-b border-white/5 sticky top-0 z-30">
                 <div class="flex flex-col">
                     <h2 class="text-lg lg:text-xl font-bold text-white tracking-tight">
-                        {% block header_title %}Dashboard{% endblock %}
+                        {% block header_title %}Uzima Mesh{% endblock %}
                     </h2>
                     <p class="text-xs text-neutral-500 hidden lg:block uppercase tracking-widest font-semibold mt-0.5">
-                        Medical Coordination Hub</p>
+                        {% if user.is_authenticated %}Medical Coordination Hub{% else %}Agentic Healthcare Platform{% endif %}</p>
                 </div>
                 <div class="flex items-center space-x-6">
+                    {% if user.is_authenticated %}
                     <div
                         class="hidden md:flex items-center space-x-3 px-4 py-2 rounded-full glass-dark border border-white/10">
                         <span
@@ -269,6 +272,13 @@
                         <span
                             class="absolute top-1 right-1 w-2 h-2 bg-mesh-500 rounded-full border-2 border-dark-950"></span>
                     </button>
+                    {% else %}
+                    <a href="{% url 'account_login' %}"
+                        class="text-xs font-bold text-neutral-400 hover:text-white uppercase tracking-widest transition-colors">Login</a>
+                    <a href="{% url 'account_signup' %}"
+                        class="bg-mesh-500 hover:bg-mesh-600 text-white text-[10px] font-bold uppercase tracking-widest px-6 py-2 rounded-full shadow-neon transition-all">Sign
+                        Up</a>
+                    {% endif %}
                 </div>
             </header>
 
