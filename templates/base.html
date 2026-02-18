@@ -165,6 +165,7 @@
                         <span class="font-medium">Dashboard</span>
                     </a>
                 </li>
+                {% if not user.doctor_profile and not user.is_superuser %}
                 <li>
                     <a href="{% url 'patient_intake' %}"
                         class="fluent-sidebar-item flex items-center px-4 py-3 rounded-fluent space-x-4 text-neutral-400 hover:text-white hover:bg-white/5 group {% if request.resolver_match.url_name == 'patient_intake' %}active{% endif %}">
@@ -179,6 +180,9 @@
                         <span class="font-medium">Patient Intake</span>
                     </a>
                 </li>
+                {% endif %}
+
+                {% if user.doctor_profile or user.is_superuser %}
                 <li>
                     <a href="{% url 'doctor_dashboard' %}"
                         class="fluent-sidebar-item flex items-center px-4 py-3 rounded-fluent space-x-4 text-neutral-400 hover:text-white hover:bg-white/5 group {% if request.resolver_match.url_name == 'doctor_dashboard' %}active{% endif %}">
@@ -193,6 +197,24 @@
                         <span class="font-medium">Command Center</span>
                     </a>
                 </li>
+                {% endif %}
+
+                {% if user.is_superuser %}
+                <li>
+                    <a href="{% url 'admin_dashboard' %}"
+                        class="fluent-sidebar-item flex items-center px-4 py-3 rounded-fluent space-x-4 text-neutral-400 hover:text-white hover:bg-white/5 group {% if request.resolver_match.url_name == 'admin_dashboard' %}active{% endif %}">
+                        <div
+                            class="p-2 rounded-lg bg-white/5 group-hover:bg-indigo-500/20 group-hover:text-indigo-500 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4">
+                                </path>
+                            </svg>
+                        </div>
+                        <span class="font-medium">System Admin</span>
+                    </a>
+                </li>
+                {% endif %}
             </ul>
 
             <div class="px-6 py-6 border-t border-white/5 lg:bg-white/2 bg-white/5">
