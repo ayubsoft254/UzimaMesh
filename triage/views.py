@@ -10,8 +10,15 @@ import json
 
 
 # ──────────────────────────────────────────────
-# Existing Dashboard (now Doctor Command Center)
+# Landing Page & Dashboard Router
 # ──────────────────────────────────────────────
+
+def landing_page(request):
+    """Render the public landing page."""
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+    return render(request, 'triage/landing_page.html')
+
 
 @login_required
 def dashboard(request):
@@ -63,6 +70,15 @@ def admin_dashboard(request):
         'stats': stats,
         'recent_sessions': recent_sessions,
     })
+
+
+@login_required
+def mcp_server_info(request):
+    """Render basic info about the MCP server (Admin only)."""
+    if not request.user.is_superuser:
+        return redirect('dashboard')
+        
+    return render(request, 'triage/mcp_info.html')
 
 
 def triage_updates(request):

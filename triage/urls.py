@@ -8,8 +8,11 @@ router.register(r'doctors', views.DoctorViewSet)
 router.register(r'sessions', views.TriageSessionViewSet)
 
 urlpatterns = [
-    # Main dashboard (redirects to doctor view)
-    path('', views.dashboard, name='dashboard'),
+    # Public Landing Page
+    path('', views.landing_page, name='landing_page'),
+
+    # Role-based Dashboard Router
+    path('dashboard/', views.dashboard, name='dashboard'),
 
     # Patient Portal
     path('patient/', views.patient_dashboard, name='patient_dashboard'),
@@ -23,6 +26,7 @@ urlpatterns = [
 
     # Admin Dashboard
     path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
+    path('admin-dashboard/mcp-info/', views.mcp_server_info, name='mcp_server_info'),
 
     # HTMX partials
     path('api/triage/updates/', views.triage_updates, name='triage_updates'),
