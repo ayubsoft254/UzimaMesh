@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+
+{% block title %}Patient Portal - Uzima Mesh{% endblock %}
+{% block header_title %}Patient Portal{% endblock %}
+
+{% block content %}
+<div class="space-y-10">
+    <!-- Patient Profile Summary -->
+    <div class="glass p-8 rounded-3xl shadow-glass border border-white/5 relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-40 h-40 bg-mesh-500/5 rounded-full blur-3xl"></div>
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div class="flex items-center space-x-5">
+                <div class="w-16 h-16 bg-mesh-500/10 rounded-2xl flex items-center justify-center border border-mesh-500/20">
+                    <span class="text-2xl font-bold text-mesh-500">{{ request.user.first_name|first }}{{ request.user.last_name|first }}</span>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-bold text-white tracking-tight">{{ request.user.get_full_name }}</h2>
+                    <p class="text-neutral-500 text-sm font-medium">{{ request.user.email }}</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3">
+                <a href="{% url 'patient_intake' %}" class="bg-mesh-500 hover:bg-mesh-600 text-white font-bold text-xs uppercase tracking-widest px-6 py-3 rounded-full transition-all duration-300 shadow-neon">
+                    New Triage Session
+                </a>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-10 pt-10 border-t border-white/5">
+            <div>
+                <p class="text-[10px] font-bold text-mesh-500 uppercase tracking-widest mb-3">Medical History</p>
+                <div class="p-4 rounded-xl bg-white/5 border border-white/5">
+                    <p class="text-sm text-neutral-400 leading-relaxed italic">
+                        {% if patient.medical_history %}{{ patient.medical_history }}{% else %}No history recorded.{% endif %}
+                    </p>
+                </div>
+            </div>
+            <div>
+                <p class="text-[10px] font-bold text-mesh-500 uppercase tracking-widest mb-3">Current Prescriptions</p>
+                <div class="p-4 rounded-xl bg-white/5 border border-white/5">
+                    <p class="text-sm text-neutral-400 leading-relaxed italic">
+                        {% if patient.current_prescriptions %}{{ patient.current_prescriptions }}{% else %}No active prescriptions.{% endif %}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Triage History -->
+    <div class="glass rounded-3xl shadow-glass overflow-hidden border border-white/5">
+        <div class="px-8 py-5 border-b border-white/5 flex items-center justify-between glass-dark">
+            <div class="flex items-center space-x-3">
+                <div class="w-2 h-6 bg-mesh-500 rounded-full"></div>
+                <h3 class="font-bold text-white tracking-tight">Your Triage History</h3>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-white/5">
+                        <th class="px-8 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Date</th>
+                        <th class="px-8 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Status</th>
+                        <th class="px-8 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Priority</th>
+                        <th class="px-8 py-4 text-left text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Summary</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for session in sessions %}
+                    <tr class="border-b border-white/5 hover:bg-white/5 transition-colors group">
+                        <td class="px-8 py-5">
+                            <p class="text-xs font-bold text-white">{{ session.created_at|date:"M d, Y" }}</p>
+                            <p class="text-[10px] text-neutral-500 font-medium">{{ session.created_at|time }}</p>
+                        </td>
+                        <td class="px-8 py-5">
+                            <span class="px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest 
+                                {% if session.status == 'PENDING' %}bg-amber-500/10 text-amber-500 border border-amber-500/20
+                                {% elif session.status == 'IN_PROGRESS' %}bg-mesh-500/10 text-mesh-500 border border-mesh-500/20
+                                {% elif session.status == 'COMPLETED' %}bg-green-500/10 text-green-500 border border-green-500/20
+                                {% else %}bg-neutral-500/10 text-neutral-500 border border-neutral-500/20{% endif %}">
+                                {{ session.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="px-8 py-5">
+                            <div class="flex items-center space-x-1">
+                                <span class="text-sm font-bold {% if session.urgency_score >= 4 %}text-red-500{% elif session.urgency_score >= 3 %}text-amber-500{% else %}text-green-500{% endif %}">
+                                    {{ session.urgency_score }}
+                                </span>
+                                <span class="text-[8px] text-neutral-600 font-bold uppercase tracking-tighter">/ 5</span>
+                            </div>
+                        </td>
+                        <td class="px-8 py-5">
+                            <p class="text-xs text-neutral-400 line-clamp-1 group-hover:line-clamp-none transition-all duration-300">
+                                {{ session.ai_summary|truncatewords:15 }}
+                            </p>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="p-16 text-center">
+                            <p class="text-neutral-600 text-xs font-bold uppercase tracking-widest">No history available</p>
+                            <p class="text-neutral-700 text-[10px] mt-2 italic">Start a triage session to see entries here</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
