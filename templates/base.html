@@ -252,8 +252,9 @@
                         {% block header_title %}Uzima Mesh{% endblock %}
                     </h2>
                     <p class="text-xs text-neutral-500 hidden lg:block uppercase tracking-widest font-semibold mt-0.5">
-                        {% if user.is_authenticated %}Medical Coordination Hub{% else %}Agentic Healthcare Platform{%
-                        endif %}</p>
+                        {% if user.is_authenticated %}Medical Coordination Hub
+                        {% else %}Agentic Healthcare Platform
+                        {% endif %}</p>
                 </div>
                 <div class="flex items-center space-x-6">
                     {% if user.is_authenticated %}
