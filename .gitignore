@@ -26,13 +26,6 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-#  Often these folders are gathered in the projects root folder
-#  to separate them from the source code.
-#  See https://pyinstaller.readthedocs.io/en/stable/operating-mode.html#build-folder-and-spec-file
-#  (Specifying these might be project specific)
-#  *.spec
-
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
@@ -62,12 +55,6 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
 
 # Sphinx documentation
 docs/_build/
@@ -83,29 +70,6 @@ target/
 profile_default/
 ipython_config.py
 
-# pyenv
-#   For a library or binary, you wish to ignore these files
-#   For a final application, you probably should check these files in
-#   .python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to check Pipfile.lock into source control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having cross-platform versions, pipenv may install dependencies that don't work, or even
-#   refuse to install, on other platforms.
-#   In that case, you might wish to ignore Pipfile.lock.
-#   .pipenv
-#   Pipfile.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to check poetry.lock in for applications.
-#   But if you decide to ignore it, uncomment the line below:
-#   poetry.lock
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to check pdm.lock in for applications.
-#   But if you decide to ignore it, uncomment the line below:
-#   pdm.lock
 
 # PEP 582; used by e.g. github.com/pdm-project/pdm
 __pypackages__/
