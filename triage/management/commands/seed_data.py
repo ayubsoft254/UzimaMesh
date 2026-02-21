@@ -8,7 +8,18 @@ class Command(BaseCommand):
     help = 'Seed data for Uzima Mesh'
 
     def handle(self, *args, **kwargs):
-        # Create a test user/doctor if not exists
+        # 1. Create a superuser if not exists
+        admin, created = User.objects.get_or_create(username='admin_uzima', defaults={
+            'email': 'admin@uzimamesh.com',
+            'is_staff': True,
+            'is_superuser': True
+        })
+        if created:
+            admin.set_password('uzima123')
+            admin.save()
+            self.stdout.write(self.style.SUCCESS('- Superuser created: admin_uzima / uzima123'))
+
+        # 2. Create a test doctor if not exists
         user, created = User.objects.get_or_create(username='dr_smith', defaults={
             'first_name': 'Alice',
             'last_name': 'Smith',
@@ -17,11 +28,23 @@ class Command(BaseCommand):
         if created:
             user.set_password('password123')
             user.save()
+            self.stdout.write(self.style.SUCCESS('- Doctor User created: dr_smith / password123'))
 
         doctor, _ = Doctor.objects.get_or_create(user=user, defaults={
             'specialty': 'Cardiology',
             'bio': 'Experienced cardiologist with a focus on triage.'
         })
+
+        # 3. Create a test patient user if not exists
+        p_user, created = User.objects.get_or_create(username='patient_jane', defaults={
+            'first_name': 'Jane',
+            'last_name': 'Doe',
+            'email': 'jane@example.com'
+        })
+        if created:
+            p_user.set_password('uzima123')
+            p_user.save()
+            self.stdout.write(self.style.SUCCESS('- Patient User created: patient_jane / uzima123'))
 
         # Realistic patient data with AI summaries
         patients_data = [

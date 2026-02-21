@@ -14,6 +14,22 @@
 
 ---
 
+## 🚀 Live Sandbox
+
+The latest version of Uzima Mesh is deployed and ready for testing.
+
+**URL:** [https://app-uzima-mesh.azurewebsites.net/](https://app-uzima-mesh.azurewebsites.net/)
+
+### Test Credentials
+
+| Role | Username | Password |
+|---|---|---|
+| **Administrator** | `admin_uzima` | `uzima123` |
+| **Doctor** | `dr_smith` | `password123` |
+| **Patient** | `patient_jane` | `uzima123` |
+
+---
+
 ## Overview
 
 Uzima Mesh is a modern, full-stack triage and healthcare coordination platform built with **Django 5.0**. It connects patients to medical professionals through an intelligent, AI-assisted workflow that prioritizes cases by urgency, generates clinical summaries, and empowers doctors with a real-time command center.
