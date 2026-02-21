@@ -26,6 +26,7 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
       linuxFxVersion: 'PYTHON|3.11'
       appCommandLine: './startup.sh'
       appSettings: [
+        { name: 'DJANGO_DEBUG', value: 'False' }
         { name: 'ALLOWED_HOSTS', value: 'localhost,127.0.0.1,${name}.azurewebsites.net' }
         { name: 'CSRF_TRUSTED_ORIGINS', value: 'https://${name}.azurewebsites.net' }
         { name: 'DATABASE_URL', value: databaseUrl }
