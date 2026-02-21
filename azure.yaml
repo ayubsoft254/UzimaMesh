@@ -1,0 +1,8 @@
+name: uzima-mesh
+metadata:
+  template: uzima-mesh-v1
+services:
+  web:
+    project: .
+    language: python
+    host: appservice
