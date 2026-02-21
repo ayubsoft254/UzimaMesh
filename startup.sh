@@ -9,9 +9,9 @@ python manage.py migrate --noinput
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# 3. Seed test users
-echo "Seeding test users..."
-python seed_users.py
+# 3. Seed test data
+echo "Seeding test data..."
+python manage.py seed_data
 
 # 4. Start Gunicorn
 echo "Starting Gunicorn..."
