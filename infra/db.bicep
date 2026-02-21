@@ -36,4 +36,4 @@ resource firewallAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallR
   }
 }
 
-output connectionString string = 'host=${postgresServer.properties.fullyQualifiedDomainName} user=${adminUser} dbname=postgres'
+output connectionString string = 'postgres://${adminUser}:${adminPassword}@${postgresServer.properties.fullyQualifiedDomainName}/postgres?sslmode=require'
