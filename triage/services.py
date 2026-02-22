@@ -56,11 +56,13 @@ class AzureAgentClient:
         """Send message to a specific agent and get response."""
         agent_id = self.get_agent_id(role)
         
-        # Add message to thread
+        # Add message to thread with system context for thread ID
+        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
+        
         self.client.agents.create_message(
             thread_id=thread_id,
             role="user",
-            content=message
+            content=context_message
         )
         
         # Create and poll run
