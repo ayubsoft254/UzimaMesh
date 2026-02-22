@@ -106,12 +106,8 @@ def patient_intake(request):
     # Ensure they have a fresh Azure AI thread
     thread_id = request.session.get('triage_thread_id')
     if not thread_id:
-        try:
-            thread_id = create_thread()
-            request.session['triage_thread_id'] = thread_id
-        except Exception as e:
-            # Fallback for local testing without proper azure env vars
-            thread_id = "local_mock_thread"
+        thread_id = create_thread()
+        request.session['triage_thread_id'] = thread_id
 
     return render(request, 'triage/patient_intake.html', {
         'thread_id': thread_id
