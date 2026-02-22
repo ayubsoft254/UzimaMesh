@@ -22,11 +22,11 @@ The latest version of Uzima Mesh is deployed and ready for testing.
 
 ### Test Credentials
 
-| Role | Username | Password |
+| Role | Email | Password |
 |---|---|---|
-| **Administrator** | `admin_uzima` | `uzima123` |
-| **Doctor** | `dr_smith` | `password123` |
-| **Patient** | `patient_jane` | `uzima123` |
+| **Administrator** | `admin@uzimamesh.com` | `uzima123` |
+| **Doctor** | `smith@uzima.com` | `password123` |
+| **Patient** | `jane@example.com` | `uzima123` |
 
 ---
 
