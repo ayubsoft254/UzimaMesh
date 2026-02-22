@@ -83,6 +83,12 @@ class TriageSession(models.Model):
         blank=True,
         help_text="Log entries for agent activity",
     )
+    thread_id = models.CharField(
+        max_length=255, 
+        blank=True, 
+        null=True,
+        help_text="Azure AI thread ID for persistence"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

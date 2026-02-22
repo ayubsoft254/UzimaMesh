@@ -102,15 +102,39 @@ except ImportError:
 # ──────────────────────────────────────────────
 
 def patient_intake(request):
-    """Render the conversational triage intake page."""
-    # Ensure they have a fresh Azure AI thread
-    thread_id = request.session.get('triage_thread_id')
+    """Render the conversational triage intake page with persistence support."""
+    thread_id = None
+    
+    # 1. Try to get thread_id from database if user is authenticated
+    if request.user.is_authenticated:
+        patient = getattr(request.user, 'patient_profile', None)
+        if patient:
+            # Check for most recent incomplete session
+            latest_session = TriageSession.objects.filter(
+                patient=patient,
+                status__in=['PENDING', 'IN_PROGRESS']
+            ).order_by('-created_at').first()
+            
+            if latest_session and latest_session.thread_id:
+                thread_id = latest_session.thread_id
+                # Also sync to session
+                request.session['triage_thread_id'] = thread_id
+    
+    # 2. Fallback to Django session if not found in DB
+    if not thread_id:
+        thread_id = request.session.get('triage_thread_id')
+    
+    # 3. Create fresh thread if still not found
     if not thread_id:
         try:
             thread_id = create_thread()
             request.session['triage_thread_id'] = thread_id
+            
+            # If authenticated, we could pre-create a PENDING session here,
+            # but the agent usually does it via tools. 
+            # For pure persistence before tool call, we rely on the session ID
+            # until a TriageSession object is actually created.
         except Exception as e:
-            # Fallback for local testing without proper azure env vars
             thread_id = "local_mock_thread"
 
     return render(request, 'triage/patient_intake.html', {
