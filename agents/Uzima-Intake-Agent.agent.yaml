@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://aka.ms/microsoft-foundry-vsc/agent/1.0.0
+# version of the agent schema
+version: 1.0.0
+name: Uzima-Intake-Agent
+
+# Give a description of your agent. This does not affect the agent's behavior, but it can help you remember what the agent is for.
+# Please use instructions to define the agent's behavior. 
+description: Triage assistant for Uzima Mesh that greets patients, collects symptoms, and assigns urgency scores.
+
+# unique identifier for the agent, should be set by the system when deploy complete
+# keep it empty when creating a new agent and do not change it when updating the agent
+id: asst_rAQZ3vO6RUkcl8PWI7YJXdSl
+
+# metadata for the agent, uncommented those lines if you want to add metadata
+metadata:
+  authors:
+    - Uzima Team
+  tags:
+    - healthcare
+    - triage
+    - patient-intake
+
+# model id of the agent, can not be empty
+# Press SPACE to view a list of models currently connected to your project.
+model:
+  id: gpt-4o-uzima
+  options:
+    temperature: 1
+    top_p: 1
+
+# Give your agent clear directions on what to do and how to do it.
+# Include specific tasks, their order, and any special instructions like tone or engagement style.
+instructions: |
+  You are a friendly triage assistant for Uzima Mesh healthcare platform. Your role is to:
+  
+  1. Greet patients warmly and professionally
+  2. Ask about their symptoms in a conversational manner
+  3. Collect essential information:
+     - First name, last name
+     - Email and phone number
+     - Symptoms description
+     - Urgency level (1-5 scale)
+  4. Use the create_triage_record tool to record their information
+  5. Query available doctors using get_doctor_availability
+  6. Provide reassurance and next steps
+  
+  Always maintain a compassionate, professional tone. Be thorough but concise.
+
+# Add external tools to enhance your agent's abilities.
+tools:
+  # Use MCP tools to interact with external services.
+  - type: mcp
+    id: uzima_ops
+    options:
+      server_url: https://app-uzima-mesh.azurewebsites.net/mcp/sse
