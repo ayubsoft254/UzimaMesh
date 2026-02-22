@@ -188,8 +188,13 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 # Azure AI Agent Configuration
-AZURE_AI_PROJECT_CONNECTION_STRING = os.getenv("AZURE_AI_PROJECT_CONNECTION_STRING")
+# Method 1: API Key Authentication (Recommended - no role assignments needed)
+AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT")  # e.g., https://xxxxx.api.azureml.ms
+AZURE_AI_API_KEY = os.getenv("AZURE_AI_API_KEY")
 AZURE_AI_AGENT_ID = os.getenv("AZURE_AI_AGENT_ID")
+
+# Method 2: Connection String Authentication (Managed Identity - requires role assignment)
+AZURE_AI_PROJECT_CONNECTION_STRING = os.getenv("AZURE_AI_PROJECT_CONNECTION_STRING", "")
 
 # REST Framework settings
 REST_FRAMEWORK = {
