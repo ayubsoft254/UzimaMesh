@@ -157,11 +157,31 @@ def api_chat(request):
     if not user_message or not thread_id:
         return JsonResponse({'error': 'Missing message or thread_id'}, status=400)
 
-    # 1. Forward message to Azure Agent
+    # 1. Determine the active role for this thread
+    role = "intake"
+    session_id = None
+    session = TriageSession.objects.filter(thread_id=thread_id).order_by('-created_at').first()
+    if session:
+        role = session.active_agent_role
+        session_id = session.id
+
+    # 2. Forward message to Azure Agent with current role and session context
     try:
-        response_data = send_message(thread_id, user_message)
+        # Prepend session info so tools like handoff_to_agent have the ID
+        context_msg = f"[Context: session_id={session_id}]\n{user_message}" if session_id else user_message
+        
+        response_data = send_message(thread_id, context_msg, role=role)
         ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
         run_status = response_data.get('run_status', 'failed')
+        
+        # 3. Check if the role changed during the run (via tool call)
+        if session:
+            session.refresh_from_db()
+            new_role = session.active_agent_role
+            if new_role != role:
+                print(f"--- Role Transition Detected: {role} -> {new_role} ---")
+                role = new_role
+                
     except Exception as e:
         ai_response_text = f"An error occurred connecting to the AI Agent: {str(e)}"
         run_status = 'error'

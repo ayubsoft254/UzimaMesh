@@ -89,6 +89,11 @@ class TriageSession(models.Model):
         null=True,
         help_text="Azure AI thread ID for persistence"
     )
+    active_agent_role = models.CharField(
+        max_length=50,
+        default='intake',
+        help_text="The role of the agent currently handling this session (e.g., intake, analysis, guardian)"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

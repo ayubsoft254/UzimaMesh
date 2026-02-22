@@ -65,6 +65,57 @@ def create_triage_record(
         "urgency": urgency_score
     }
 
+@mcp_app.tool()
+def handoff_to_agent(session_id: int, target_role: str):
+    """
+    Hand off the patient to another specialized agent.
+    Use this when the current agent has completed its collection or safety check.
+    target_role can be: analysis, guardian, scheduler, orchestrator.
+    """
+    try:
+        session = TriageSession.objects.get(id=session_id)
+        old_role = session.active_agent_role
+        session.active_agent_role = target_role
+        session.agent_logs += f"\n[System] Handoff: {old_role} -> {target_role}"
+        session.save()
+        
+        return {
+            "status": "success",
+            "message": f"Successfully handed off to {target_role}. The user's next message will be handled by {target_role}.",
+            "handoff_signal": True,
+            "target_role": target_role
+        }
+    except TriageSession.DoesNotExist:
+        return {"status": "error", "message": f"Session {session_id} not found."}
+
+@mcp_app.tool()
+def consult_agent(thread_id: str, query: str, target_role: str):
+    """
+    Synchronously consult another specialized agent without handing off.
+    Use this to get an expert opinion (e.g., Intake asking Analysis for urgency).
+    """
+    from triage.services import send_message
+    
+    try:
+        # Prevent infinite loops by restricting consultation
+        if target_role == "intake":
+            return {"status": "error", "message": "Cannot consult the intake agent."}
+            
+        print(f"--- Consult: {target_role} with query '{query}' ---")
+        # Use a fresh thread for consultation to avoid locking the main triage thread
+        from triage.services import create_thread, send_message
+        consult_thread_id = create_thread()
+        response = send_message(consult_thread_id, query, role=target_role)
+        
+        return {
+            "status": "success",
+            "agent": target_role,
+            "consultation_response": response.get("content", ""),
+            "run_status": response.get("run_status")
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # Standalone execution is no longer the primary way to run this,
 # but we keep it for local testing if needed.
 if __name__ == "__main__":
