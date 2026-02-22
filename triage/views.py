@@ -90,88 +90,66 @@ def triage_updates(request):
     })
 
 
+try:
+    from .services import create_thread, send_message
+except ImportError:
+    # Fallback/mock if azure-ai-projects isn't ready
+    def create_thread(): return "mock_thread_id"
+    def send_message(tid, msg): return {"content": "Azure AI SDK not fully loaded. I am a mock agent.", "run_status": "completed"}
+
 # ──────────────────────────────────────────────
 # Patient Intake — Conversational UI
 # ──────────────────────────────────────────────
 
 def patient_intake(request):
     """Render the conversational triage intake page."""
-    return render(request, 'triage/patient_intake.html')
+    # Ensure they have a fresh Azure AI thread
+    thread_id = request.session.get('triage_thread_id')
+    if not thread_id:
+        try:
+            thread_id = create_thread()
+            request.session['triage_thread_id'] = thread_id
+        except Exception as e:
+            # Fallback for local testing without proper azure env vars
+            thread_id = "local_mock_thread"
+
+    return render(request, 'triage/patient_intake.html', {
+        'thread_id': thread_id
+    })
 
 
 @csrf_exempt
 @require_POST
-def patient_intake_submit(request):
-    """Receive the completed intake data and create a TriageSession."""
+def api_chat(request):
+    """Receive a chat message from the patient and forward to Azure AI."""
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    name_parts = data.get('name', 'Unknown').split(' ', 1)
-    first_name = name_parts[0]
-    last_name = name_parts[1] if len(name_parts) > 1 else ''
+    user_message = data.get('message', '').strip()
+    thread_id = data.get('thread_id')
 
-    symptoms = data.get('symptoms', '')
-    duration = data.get('duration', '')
-    severity = int(data.get('severity', 3))
-    urgency_score = int(data.get('urgency_score', 1))
+    if not user_message or not thread_id:
+        return JsonResponse({'error': 'Missing message or thread_id'}, status=400)
 
-    # Create or find patient
-    patient, _ = Patient.objects.get_or_create(
-        first_name=first_name,
-        last_name=last_name,
-        defaults={'email': f"{first_name.lower()}.{last_name.lower()}@patient.uzima.mesh"}
-    )
+    # 1. Forward message to Azure Agent
+    try:
+        response_data = send_message(thread_id, user_message)
+        ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
+        run_status = response_data.get('run_status', 'failed')
+    except Exception as e:
+        ai_response_text = f"An error occurred connecting to the AI Agent: {str(e)}"
+        run_status = 'error'
 
-    # Build AI summary (mock)
-    if urgency_score >= 4:
-        ai_summary = (
-            f"• Symptom: {symptoms}\n"
-            f"• Duration: {duration}, self-reported severity {severity}/10\n"
-            f"• AI Recommendation: Immediate medical attention required"
-        )
-        recommended_action = "Immediate review — potential acute condition"
-    elif urgency_score >= 3:
-        ai_summary = (
-            f"• Symptom: {symptoms}\n"
-            f"• Duration: {duration}, self-reported severity {severity}/10\n"
-            f"• AI Recommendation: Priority consultation within 15 minutes"
-        )
-        recommended_action = "Urgent review — schedule priority consultation"
-    else:
-        ai_summary = (
-            f"• Symptom: {symptoms}\n"
-            f"• Duration: {duration}, self-reported severity {severity}/10\n"
-            f"• AI Recommendation: Routine appointment scheduling"
-        )
-        recommended_action = "Routine care — schedule appointment"
-
-    full_symptoms = f"{symptoms} (Duration: {duration}, Severity: {severity}/10)"
-
-    session = TriageSession.objects.create(
-        patient=patient,
-        symptoms=full_symptoms,
-        urgency_score=urgency_score,
-        status='PENDING',
-        ai_summary=ai_summary,
-        recommended_action=recommended_action,
-        agent_logs=(
-            f"[Intake Agent] Session created via conversational intake\n"
-            f"[Intake Agent] Patient: {patient}\n"
-            f"[Intake Agent] Urgency score computed: {urgency_score}\n"
-            f"[Intake Agent] Recommended: {recommended_action}"
-        ),
-    )
-
-    # Save chat messages
-    ChatMessage.objects.create(session=session, role='agent', content='Greeting and intake interview')
-    ChatMessage.objects.create(session=session, role='patient', content=full_symptoms)
+    # (Logic to check if agent called the `create_triage_record` tool internally 
+    # would ideally belong here to formally end the chat session, but for now 
+    # we just act as a pass-through proxy.)
 
     return JsonResponse({
         'status': 'success',
-        'session_id': session.id,
-        'urgency_score': urgency_score,
+        'message': ai_response_text,
+        'run_status': run_status
     })
 
 

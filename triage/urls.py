@@ -17,7 +17,7 @@ urlpatterns = [
     # Patient Portal
     path('patient/', views.patient_dashboard, name='patient_dashboard'),
     path('intake/', views.patient_intake, name='patient_intake'),
-    path('intake/submit/', views.patient_intake_submit, name='patient_intake_submit'),
+    path('api/chat/', views.api_chat, name='api_chat'),
 
     # Doctor Command Center
     path('doctor/', views.doctor_dashboard, name='doctor_dashboard'),

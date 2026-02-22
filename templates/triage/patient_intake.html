@@ -172,33 +172,16 @@
     const urgencyCard = document.getElementById('urgency-card');
     const inputBar = document.getElementById('input-bar');
 
-    let conversationStep = 0;
-    let patientData = { name: '', symptoms: '', duration: '', severity: '' };
-
-    // Scripted conversation flow
-    const agentFlow = [
-        {
-            message: "Hello, I'm your Uzima Mesh Intake Coordinator. I'm here to help assess your condition and connect you with the right care. Can I start with your name?",
-            field: 'name'
-        },
-        {
-            message: "Thank you, {name}. I understand you may not be feeling well. Can you describe what symptoms you're experiencing? Please be as specific as possible.",
-            field: 'symptoms'
-        },
-        {
-            message: "I see. And how long have you been experiencing these symptoms?",
-            field: 'duration'
-        },
-        {
-            message: "On a scale of 1-10, how would you rate the intensity of your discomfort right now?",
-            field: 'severity'
-        }
-    ];
+    // Thread ID provided by Django context
+    const threadId = "{{ thread_id }}";
 
     function addMessage(content, role) {
         const isAgent = role === 'agent';
         const wrapper = document.createElement('div');
         wrapper.className = `flex ${isAgent ? 'justify-start msg-agent' : 'justify-end msg-patient'}`;
+
+        // Format content, preserving newlines
+        const formattedContent = content.replace(/\ng/g, '<br>');
 
         if (isAgent) {
             wrapper.innerHTML = `
@@ -209,9 +192,9 @@
                         </svg>
                     </div>
                     <div>
-                        <p class="text-[9px] text-mesh-500/60 font-bold uppercase tracking-widest mb-1">Intake Agent</p>
+                        <p class="text-[9px] text-mesh-500/60 font-bold uppercase tracking-widest mb-1">AI Assistant</p>
                         <div class="glass px-5 py-3.5 rounded-2xl rounded-bl-md">
-                            <p class="text-sm text-neutral-200 leading-relaxed">${content}</p>
+                            <p class="text-sm text-neutral-200 leading-relaxed">${formattedContent}</p>
                         </div>
                     </div>
                 </div>`;
@@ -220,7 +203,7 @@
                 <div class="max-w-[85%]">
                     <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest mb-1 text-right">You</p>
                     <div class="bg-mesh-500/20 border border-mesh-500/20 px-5 py-3.5 rounded-2xl rounded-br-md">
-                        <p class="text-sm text-white leading-relaxed">${content}</p>
+                        <p class="text-sm text-white leading-relaxed">${formattedContent}</p>
                     </div>
                 </div>`;
         }
@@ -243,124 +226,50 @@
         chatInput.focus();
     }
 
-    function generateUrgency() {
-        const severity = parseInt(patientData.severity) || 3;
-        let urgencyLevel, urgencyColor, urgencyBg, urgencyBorder, action, score;
+    async function sendMessage(textOverride = null) {
+        const text = textOverride || chatInput.value.trim();
+        if (!text) return;
 
-        if (severity >= 8) {
-            urgencyLevel = 'Critical Priority';
-            urgencyColor = 'text-red-400';
-            urgencyBg = 'bg-red-500/10';
-            urgencyBorder = 'border-red-500/30';
-            action = 'Please stay on the line. A doctor is being notified immediately and will attend to you shortly.';
-            score = 5;
-        } else if (severity >= 5) {
-            urgencyLevel = 'High Priority';
-            urgencyColor = 'text-amber-400';
-            urgencyBg = 'bg-amber-500/10';
-            urgencyBorder = 'border-amber-500/30';
-            action = 'Your case has been flagged as urgent. A medical professional will review your case within the next 15 minutes.';
-            score = 3;
-        } else {
-            urgencyLevel = 'Routine Care';
-            urgencyColor = 'text-green-400';
-            urgencyBg = 'bg-green-500/10';
-            urgencyBorder = 'border-green-500/30';
-            action = 'Your appointment has been scheduled. You will receive a confirmation with the time and details shortly.';
-            score = 1;
-        }
-
-        // Show urgency card
-        urgencyCard.classList.remove('hidden');
-        urgencyCard.innerHTML = `
-            <div class="${urgencyBg} border ${urgencyBorder} rounded-2xl p-8 space-y-6">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-[9px] ${urgencyColor} font-bold uppercase tracking-[0.2em]">Assessment Complete</p>
-                        <h3 class="text-xl font-bold text-white mt-1">${urgencyLevel}</h3>
-                    </div>
-                    <div class="w-14 h-14 rounded-2xl ${urgencyBg} border ${urgencyBorder} flex items-center justify-center">
-                        <span class="text-2xl font-bold ${urgencyColor}">${score}</span>
-                    </div>
-                </div>
-                <div class="border-t border-white/5 pt-4">
-                    <p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mb-2">Recommended Action</p>
-                    <p class="text-sm text-neutral-300 leading-relaxed">${action}</p>
-                </div>
-                <div class="border-t border-white/5 pt-4 grid grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-[9px] text-neutral-600 font-bold uppercase tracking-widest">Patient</p>
-                        <p class="text-sm text-white font-semibold mt-1">${patientData.name}</p>
-                    </div>
-                    <div>
-                        <p class="text-[9px] text-neutral-600 font-bold uppercase tracking-widest">Duration</p>
-                        <p class="text-sm text-white font-semibold mt-1">${patientData.duration}</p>
-                    </div>
-                    <div class="col-span-2">
-                        <p class="text-[9px] text-neutral-600 font-bold uppercase tracking-widest">Primary Symptoms</p>
-                        <p class="text-sm text-white font-semibold mt-1">${patientData.symptoms}</p>
-                    </div>
-                </div>
-                <a href="/" class="block w-full text-center bg-mesh-500 hover:bg-mesh-600 text-white font-bold py-3.5 rounded-fluent shadow-neon transition-all uppercase tracking-wider text-xs">
-                    Return to Dashboard
-                </a>
-            </div>`;
-
-        // Submit to backend
-        fetch('/intake/submit/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
-                    document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
-            },
-            body: JSON.stringify({
-                name: patientData.name,
-                symptoms: patientData.symptoms,
-                duration: patientData.duration,
-                severity: severity,
-                urgency_score: score
-            })
-        }).catch(() => { });  // Fire and forget
-    }
-
-    function sendMessage() {
-        const text = chatInput.value.trim();
-        if (!text || conversationStep > agentFlow.length) return;
-
-        addMessage(text, 'patient');
-        chatInput.value = '';
-
-        // Store patient data
-        const currentField = agentFlow[conversationStep - 1]?.field;
-        if (currentField) {
-            patientData[currentField] = text;
-        }
-
-        if (conversationStep >= agentFlow.length) {
-            // Interview complete
-            patientData['severity'] = text;
-            showTyping();
-            setTimeout(() => {
-                hideTyping();
-                addMessage(
-                    `Thank you for sharing that, ${patientData.name}. I've completed my initial assessment. Here's your triage summary:`,
-                    'agent'
-                );
-                setTimeout(() => generateUrgency(), 800);
-                inputBar.classList.add('hidden');
-            }, 2000);
-            return;
+        if (!textOverride) {
+            addMessage(text, 'patient');
+            chatInput.value = '';
         }
 
         showTyping();
-        setTimeout(() => {
+
+        try {
+            const response = await fetch('/api/chat/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
+                        document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
+                },
+                body: JSON.stringify({
+                    message: text,
+                    thread_id: threadId
+                })
+            });
+
+            const data = await response.json();
             hideTyping();
-            let msg = agentFlow[conversationStep].message;
-            msg = msg.replace('{name}', patientData.name || 'there');
-            addMessage(msg, 'agent');
-            conversationStep++;
-        }, 1200 + Math.random() * 800);
+
+            if (data.error) {
+                addMessage("I experienced a connection issue. Please try again.", 'agent');
+                console.error(data.error);
+                return;
+            }
+
+            addMessage(data.message, 'agent');
+
+            // If the agent determines the intake is complete, we could look for a specific 
+            // signal in the response to show the urgency card. For now, we rely solely on chat.
+
+        } catch (error) {
+            hideTyping();
+            addMessage("I'm sorry, my network seems to be having trouble reaching the triage systems.", 'agent');
+            console.error('Chat error:', error);
+        }
     }
 
     // Enter key handler
@@ -371,11 +280,10 @@
         }
     });
 
-    // Start conversation
-    setTimeout(() => {
-        addMessage(agentFlow[0].message, 'agent');
-        conversationStep = 1;
-        chatInput.focus();
-    }, 600);
+    // Start conversation automatically when the page loads
+    window.addEventListener('DOMContentLoaded', () => {
+        // Send a hidden initialization message to trigger the agent's initial prompt
+        sendMessage("Hello! I need to start a triage intake.");
+    });
 </script>
 {% endblock %}
