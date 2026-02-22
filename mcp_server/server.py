@@ -1,12 +1,14 @@
 import os
 import django
 from django.conf import settings
+from django.apps import apps
 
 # Initialize Django (needed if running as a standalone script for testing, 
 # but usually handled by asgi.py/wsgi.py in production)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'uzima_mesh.settings')
 if not apps.ready:
     django.setup()
+
 
 from triage.models import Doctor, Patient, TriageSession
 from django_mcp import mcp_app
