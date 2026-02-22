@@ -1,17 +1,17 @@
 import os
 import django
-from fastmcp import FastMCP
+from django.conf import settings
 
-# Initialize Django
+# Initialize Django (needed if running as a standalone script for testing, 
+# but usually handled by asgi.py/wsgi.py in production)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'uzima_mesh.settings')
-django.setup()
+if not apps.ready:
+    django.setup()
 
 from triage.models import Doctor, Patient, TriageSession
+from django_mcp import mcp_app
 
-# Create MCP server
-mcp = FastMCP("UzimaMesh")
-
-@mcp.tool()
+@mcp_app.tool()
 def get_doctor_availability(specialty: str = None):
     """Query available doctors, optionally filtering by specialty."""
     query = Doctor.objects.filter(is_available=True)
@@ -28,7 +28,7 @@ def get_doctor_availability(specialty: str = None):
         })
     return doctors
 
-@mcp.tool()
+@mcp_app.tool()
 def create_triage_record(
     first_name: str, 
     last_name: str, 
@@ -61,5 +61,7 @@ def create_triage_record(
         "urgency": urgency_score
     }
 
+# Standalone execution is no longer the primary way to run this,
+# but we keep it for local testing if needed.
 if __name__ == "__main__":
-    mcp.run()
+    mcp_app.run()

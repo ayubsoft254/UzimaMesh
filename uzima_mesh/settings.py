@@ -55,6 +55,7 @@ INSTALLED_APPS = [
 
     # Local apps
     'triage',
+    'django_mcp',
 ]
 
 MIDDLEWARE = [
@@ -229,3 +230,9 @@ LOGGING = {
         },
     },
 }
+
+# MCP Server Settings
+MCP_SERVER_TITLE = "UzimaMesh MCP Server"
+MCP_SERVER_INSTRUCTIONS = "Use these tools to triage patients and check doctor availability."
+MCP_SERVER_VERSION = "1.0.0"
+

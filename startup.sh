@@ -13,6 +13,6 @@ python manage.py collectstatic --noinput
 echo "Seeding test data..."
 python manage.py seed_data
 
-# 4. Start Gunicorn
-echo "Starting Gunicorn..."
-gunicorn --bind=0.0.0.0 --timeout 600 uzima_mesh.wsgi
+# 4. Start Gunicorn with ASGI worker
+echo "Starting Gunicorn (ASGI)..."
+gunicorn --bind=0.0.0.0 --timeout 600 -k uvicorn.workers.UvicornWorker uzima_mesh.asgi:application
