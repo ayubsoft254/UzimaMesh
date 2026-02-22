@@ -108,9 +108,9 @@ def create_thread() -> str:
     return client.create_thread()
 
 
-def send_message(thread_id: str, message: str) -> dict:
+def send_message(thread_id: str, message: str, role: str = "intake") -> dict:
     """
     Sends a message to the thread, runs the agent, and returns response.
     """
     client = get_project_client()
-    return client.send_message(thread_id, message)
+    return client.send_message(thread_id, message, role=role)
