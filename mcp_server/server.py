@@ -37,7 +37,8 @@ def create_triage_record(
     email: str, 
     symptoms: str, 
     urgency_score: int,
-    phone: str = ""
+    phone: str = "",
+    thread_id: str = None
 ):
     """Create a new patient record and a corresponding triage session."""
     patient, created = Patient.objects.get_or_create(
@@ -53,7 +54,8 @@ def create_triage_record(
         patient=patient,
         symptoms=symptoms,
         urgency_score=urgency_score,
-        status='PENDING'
+        status='PENDING',
+        thread_id=thread_id
     )
     
     return {

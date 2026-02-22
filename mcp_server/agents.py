@@ -22,7 +22,8 @@ class AgentIntegration:
         email: str,
         phone: str,
         symptoms: str,
-        urgency_score: int
+        urgency_score: int,
+        thread_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create a new triage session with patient information.
@@ -34,6 +35,7 @@ class AgentIntegration:
             phone: Patient's phone number
             symptoms: Description of symptoms
             urgency_score: Urgency level (1-5)
+            thread_id: Optional Azure AI thread ID
             
         Returns:
             Dictionary with session details
@@ -49,12 +51,12 @@ class AgentIntegration:
                 }
             )
             
-            # Create triage session
             session = TriageSession.objects.create(
                 patient=patient,
                 symptoms=symptoms,
                 urgency_score=urgency_score,
-                status='new'
+                status='PENDING',
+                thread_id=thread_id
             )
             
             logger.info(f"Created triage session {session.id} for {email}")
