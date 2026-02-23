@@ -183,8 +183,26 @@ def api_chat(request):
                 role = new_role
                 
     except Exception as e:
-        ai_response_text = f"An error occurred connecting to the AI Agent: {str(e)}"
-        run_status = 'error'
+        error_str = str(e)
+        # Handle expired/invalid threads by automatically creating a new one
+        if "No thread found with id" in error_str.lower() or "not found" in error_str.lower():
+            try:
+                print("Stale thread detected. Creating a new thread session...")
+                new_thread_id = create_thread()
+                request.session['triage_thread_id'] = new_thread_id
+                
+                # Retry sending the message with the new thread ID
+                response_data = send_message(new_thread_id, context_msg, role="intake")
+                ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
+                run_status = response_data.get('run_status', 'failed')
+                
+                # We do not return an error here; we gracefully handled it.
+            except Exception as retry_e:
+                ai_response_text = f"An error occurred connecting to the AI Agent (Retry failed): {str(retry_e)}"
+                run_status = 'error'
+        else:
+            ai_response_text = f"An error occurred connecting to the AI Agent: {error_str}"
+            run_status = 'error'
 
     # (Logic to check if agent called the `create_triage_record` tool internally 
     # would ideally belong here to formally end the chat session, but for now 
