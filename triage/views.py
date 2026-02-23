@@ -95,7 +95,10 @@ try:
 except ImportError:
     # Fallback/mock if azure-ai-projects isn't ready
     def create_thread(): return "mock_thread_id"
-    def send_message(tid, msg): return {"content": "Azure AI SDK not fully loaded. I am a mock agent.", "run_status": "completed"}
+    def send_message(tid, msg, role="intake"): return {"content": "Azure AI SDK not fully loaded. I am a mock agent.", "run_status": "completed"}
+    def send_message_stream(tid, msg, role="intake"):
+        yield '{"type": "chunk", "content": "Azure AI SDK not fully loaded."}\n\n'
+        yield '{"type": "done", "run_status": "completed"}\n\n'
 
 # ──────────────────────────────────────────────
 # Patient Intake — Conversational UI
@@ -213,6 +216,55 @@ def api_chat(request):
         'message': ai_response_text,
         'run_status': run_status
     })
+
+@csrf_exempt
+@require_POST
+def api_chat_stream(request):
+    """Receive a chat message and return a StreamingHttpResponse with SSE chunked data."""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    user_message = data.get('message', '').strip()
+    thread_id = data.get('thread_id')
+
+    if not user_message or not thread_id:
+        return JsonResponse({'error': 'Missing message or thread_id'}, status=400)
+
+    role = "intake"
+    session_id = None
+    session = TriageSession.objects.filter(thread_id=thread_id).order_by('-created_at').first()
+    if session:
+        role = session.active_agent_role
+        session_id = session.id
+
+    context_msg = f"[Context: session_id={session_id}]\n{user_message}" if session_id else user_message
+    
+    from django.http import StreamingHttpResponse
+    
+    # Try sending message
+    try:
+        generator = send_message_stream(thread_id, context_msg, role=role)
+        return StreamingHttpResponse(generator, content_type='text/event-stream')
+    except Exception as e:
+        error_str = str(e)
+        if "No thread found with id" in error_str.lower() or "not found" in error_str.lower():
+            try:
+                print("Stale thread detected. Creating a new thread session...")
+                new_thread_id = create_thread()
+                request.session['triage_thread_id'] = new_thread_id
+                
+                generator = send_message_stream(new_thread_id, context_msg, role="intake")
+                return StreamingHttpResponse(generator, content_type='text/event-stream')
+            except Exception as retry_e:
+                def err_gen():
+                    yield json.dumps({"type": "error", "content": f"Retry failed: {str(retry_e)}"}) + "\n\n"
+                return StreamingHttpResponse(err_gen(), content_type='text/event-stream')
+        else:
+            def err_gen():
+                yield json.dumps({"type": "error", "content": f"Error: {error_str}"}) + "\n\n"
+            return StreamingHttpResponse(err_gen(), content_type='text/event-stream')
 
 
 # ──────────────────────────────────────────────
