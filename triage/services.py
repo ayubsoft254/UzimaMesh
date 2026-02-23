@@ -65,12 +65,83 @@ class AzureAgentClient:
             content=context_message
         )
         
-        # Create and poll run
-        run = self.client.agents.create_and_process_run(
+        # Create run manually and poll to handle tool calls
+        run = self.client.agents.create_run(
             thread_id=thread_id,
-            assistant_id=agent_id
+            assistant_id=agent_id,
+            max_completion_tokens=500  # Strategy 3: Limit Token Output
         )
         
+        import time
+        start_time = time.time()
+        while run.status in ["queued", "in_progress"]:
+            if time.time() - start_time > 30:
+                print(f"Cancelling stalled run after 30 seconds. Run ID: {run.id}, Status: {run.status}")
+                self.client.agents.cancel_run(thread_id=thread_id, run_id=run.id)
+                return {"content": "I am experiencing delays connecting to the triage systems. Please try again.", "run_status": "error", "agent_role": role}
+            time.sleep(0.2)
+            run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
+            
+        if run.status == "requires_action":
+            # Extract tool calls and execute them concurrently (Strategy 4)
+            from mcp_server.server import (
+                create_triage_record, handoff_to_agent, consult_agent, get_doctor_availability
+            )
+            import concurrent.futures
+            
+            tool_outputs = []
+            if hasattr(run, "required_action") and hasattr(run.required_action, "submit_tool_outputs"):
+                
+                def execute_single_tool(tool_call):
+                    func_name = tool_call.function.name
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError:
+                        args = {}
+                    
+                    output = None
+                    try:
+                        if func_name == "create_triage_record":
+                            output = create_triage_record(**args)
+                        elif func_name == "handoff_to_agent":
+                            output = handoff_to_agent(**args)
+                        elif func_name == "consult_agent":
+                            output = consult_agent(**args)
+                        elif func_name == "get_doctor_availability":
+                            output = get_doctor_availability(**args)
+                        else:
+                            output = {"error": f"Unknown tool: {func_name}"}
+                    except Exception as e:
+                        output = {"error": str(e)}
+                    
+                    return {
+                        "tool_call_id": tool_call.id,
+                        "output": json.dumps(output)
+                    }
+
+                tool_calls = run.required_action.submit_tool_outputs.tool_calls
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [executor.submit(execute_single_tool, tc) for tc in tool_calls]
+                    for future in concurrent.futures.as_completed(futures):
+                        tool_outputs.append(future.result())
+                
+                if tool_outputs:
+                    run = self.client.agents.submit_tool_outputs_to_run(
+                        thread_id=thread_id,
+                        run_id=run.id,
+                        tool_outputs=tool_outputs
+                    )
+                    
+                    # Poll again until terminal
+                    loop2_start = time.time()
+                    while run.status in ["queued", "in_progress"]:
+                        if time.time() - loop2_start > 30:
+                            print(f"Cancelling stalled run during tool output polling. Run ID: {run.id}")
+                            self.client.agents.cancel_run(thread_id=thread_id, run_id=run.id)
+                            return {"content": "I am taking too long to verify that information. Let's try again.", "run_status": "error", "agent_role": role}
+                        time.sleep(0.2)
+                        run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
+
         # Get latest assistant message
         messages = self.client.agents.list_messages(thread_id=thread_id)
         
@@ -93,6 +164,114 @@ class AzureAgentClient:
         }
 
 
+
+    def send_message_stream(self, thread_id: str, message: str, role: str = "intake"):
+        """Streams message to a specific agent using Azure generator API."""
+        agent_id = self.get_agent_id(role)
+        
+        # Add message to thread
+        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
+        self.client.agents.create_message(
+            thread_id=thread_id,
+            role="user",
+            content=context_message
+        )
+        
+        def stream_generator():
+            try:
+                with self.client.agents.create_stream(
+                    thread_id=thread_id,
+                    assistant_id=agent_id,
+                    max_completion_tokens=500
+                ) as stream:
+                    requires_action = False
+                    run_id = None
+                    tool_calls = []
+                    
+                    for event_tuple in stream:
+                        # Azure SDK stream yields tuples: (event_name, event_data)
+                        if not isinstance(event_tuple, tuple) or len(event_tuple) != 2:
+                            continue
+                        event_type, event_data = event_tuple
+                        
+                        if event_type == "thread.run.created":
+                            run_id = getattr(event_data, "id", None)
+                        elif event_type == "thread.message.delta":
+                            for block in event_data.delta.content:
+                                if getattr(block, 'type', None) == 'text' or (isinstance(block, dict) and block.get('type') == 'text'):
+                                    text_val = block.text.value if not isinstance(block, dict) else block["text"]["value"]
+                                    yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+                        elif event_type == "thread.run.requires_action":
+                            requires_action = True
+                            if hasattr(event_data, 'id'):
+                                run_id = event_data.id
+                            if hasattr(event_data, 'required_action') and hasattr(event_data.required_action, 'submit_tool_outputs'):
+                                tool_calls = event_data.required_action.submit_tool_outputs.tool_calls
+                    
+                    if requires_action and tool_calls and run_id:
+                        from mcp_server.server import (
+                            create_triage_record, handoff_to_agent, consult_agent, get_doctor_availability
+                        )
+                        import concurrent.futures
+                        
+                        tool_outputs = []
+                        def execute_single_tool(tc):
+                            func_name = tc.function.name
+                            try:
+                                args = json.loads(tc.function.arguments)
+                            except json.JSONDecodeError:
+                                args = {}
+                                
+                            output = None
+                            try:
+                                if func_name == "create_triage_record":
+                                    output = create_triage_record(**args)
+                                elif func_name == "handoff_to_agent":
+                                    output = handoff_to_agent(**args)
+                                elif func_name == "consult_agent":
+                                    output = consult_agent(**args)
+                                elif func_name == "get_doctor_availability":
+                                    output = get_doctor_availability(**args)
+                                else:
+                                    output = {"error": f"Unknown tool: {func_name}"}
+                            except Exception as e:
+                                output = {"error": str(e)}
+                                
+                            return {
+                                "tool_call_id": tc.id,
+                                "output": json.dumps(output)
+                            }
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                            futures = [executor.submit(execute_single_tool, tc) for tc in tool_calls]
+                            for future in concurrent.futures.as_completed(futures):
+                                tool_outputs.append(future.result())
+                                
+                        if tool_outputs:
+                            with self.client.agents.submit_tool_outputs_to_stream(
+                                thread_id=thread_id,
+                                run_id=run_id,
+                                tool_outputs=tool_outputs
+                            ) as new_stream:
+                                for event_tuple in new_stream:
+                                    if not isinstance(event_tuple, tuple) or len(event_tuple) != 2:
+                                        continue
+                                    event_type, event_data = event_tuple
+                                    if event_type == "thread.message.delta":
+                                        for block in event_data.delta.content:
+                                            text_val = block.text.value if not isinstance(block, dict) else block["text"]["value"]
+                                            yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+                                    elif event_type == "thread.run.completed":
+                                        yield json.dumps({"type": "done", "run_status": "completed"}) + "\n\n"
+                                return
+                                
+                    yield json.dumps({"type": "done", "run_status": "completed"}) + "\n\n"
+
+            except Exception as e:
+                yield json.dumps({"type": "error", "content": str(e)}) + "\n\n"
+        
+        return stream_generator()
+
 # Cache the client instance
 _client = None
 
@@ -114,3 +293,10 @@ def send_message(thread_id: str, message: str, role: str = "intake") -> dict:
     """
     client = get_project_client()
     return client.send_message(thread_id, message, role=role)
+
+def send_message_stream(thread_id: str, message: str, role: str = "intake"):
+    """
+    Sends a message to the thread, runs the agent via stream, and returns a generator.
+    """
+    client = get_project_client()
+    return client.send_message_stream(thread_id, message, role=role)
