@@ -60,10 +60,12 @@ class TriageSession(models.Model):
         blank=True,
         related_name='triage_sessions',
     )
-    symptoms = models.TextField()
+    symptoms = models.TextField(blank=True, null=True)
     urgency_score = models.IntegerField(
         choices=[(i, i) for i in range(1, 6)],
         default=1,
+        blank=True,
+        null=True,
     )
     status = models.CharField(
         max_length=20,
