@@ -88,7 +88,7 @@ class AzureAgentClient:
             thread_id=thread_id,
             assistant_id=agent_id,
             additional_instructions=additional_instructions,
-            max_completion_tokens=500  # Strategy 3: Limit Token Output
+            max_completion_tokens=10000  # Increased for detailed assessments
         )
         
         import time
@@ -221,7 +221,7 @@ class AzureAgentClient:
                     thread_id=thread_id,
                     assistant_id=agent_id,
                     additional_instructions=additional_instructions,
-                    max_completion_tokens=500
+                    max_completion_tokens=10000
                 ) as stream:
                     requires_action = False
                     run_id = None
