@@ -173,7 +173,28 @@ def api_chat(request):
         # Prepend session info so tools like handoff_to_agent have the ID
         context_msg = f"[Context: session_id={session_id}]\n{user_message}" if session_id else user_message
         
-        response_data = send_message(thread_id, context_msg, role=role)
+        # Strategy: Personalization - Fetch patient data
+        user_data = None
+        if request.user.is_authenticated:
+            patient = getattr(request.user, 'patient_profile', None)
+            if patient:
+                user_data = {
+                    'first_name': patient.first_name,
+                    'last_name': patient.last_name,
+                    'email': patient.email
+                }
+            else:
+                # Fallback to User model
+                user_data = {
+                    'first_name': request.user.first_name,
+                    'last_name': request.user.last_name,
+                    'email': request.user.email
+                }
+            print(f"DEBUG VIEWS: Found user_data for {request.user.username}: {user_data}")
+        else:
+            print("DEBUG VIEWS: User not authenticated.")
+        
+        response_data = send_message(thread_id, context_msg, role=role, user_data=user_data)
         ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
         run_status = response_data.get('run_status', 'failed')
         
@@ -243,9 +264,30 @@ def api_chat_stream(request):
     
     from django.http import StreamingHttpResponse
     
+    # Strategy: Personalization - Fetch patient data
+    user_data = None
+    if request.user.is_authenticated:
+        patient = getattr(request.user, 'patient_profile', None)
+        if patient:
+            user_data = {
+                'first_name': patient.first_name,
+                'last_name': patient.last_name,
+                'email': patient.email
+            }
+        else:
+            # Fallback to User model
+            user_data = {
+                'first_name': request.user.first_name,
+                'last_name': request.user.last_name,
+                'email': request.user.email
+            }
+        print(f"DEBUG VIEWS STREAM: Found user_data for {request.user.username}: {user_data}")
+    else:
+        print("DEBUG VIEWS STREAM: User not authenticated.")
+
     # Try sending message
     try:
-        generator = send_message_stream(thread_id, context_msg, role=role)
+        generator = send_message_stream(thread_id, context_msg, role=role, user_data=user_data)
         return StreamingHttpResponse(generator, content_type='text/event-stream')
     except Exception as e:
         error_str = str(e)

@@ -52,13 +52,31 @@ class AzureAgentClient:
         """Get agent ID by role."""
         return self.agents.get(role) or self.agents.get("default")
 
-    def send_message(self, thread_id: str, message: str, role: str = "intake") -> Dict[str, Any]:
+    def send_message(self, thread_id: str, message: str, role: str = "intake", user_data: dict = None) -> Dict[str, Any]:
         """Send message to a specific agent and get response."""
         agent_id = self.get_agent_id(role)
         
         # Add message to thread with system context for thread ID
         context_message = f"[System Context: thread_id={thread_id}]\n{message}"
         
+        # Prepare personalization instructions if user_data is provided
+        additional_instructions = None
+        if user_data:
+            name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or "Guest"
+            email = user_data.get('email', 'unknown')
+            first_name = user_data.get('first_name') or name.split()[0] or "there"
+            
+            # Additional run instructions
+            additional_instructions = (
+                f"You ARE talking to {name} (Email: {email}). "
+                "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
+            )
+            # Inject context into message for absolute certainty
+            message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
+
+        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
+
         self.client.agents.create_message(
             thread_id=thread_id,
             role="user",
@@ -69,7 +87,8 @@ class AzureAgentClient:
         run = self.client.agents.create_run(
             thread_id=thread_id,
             assistant_id=agent_id,
-            max_completion_tokens=500  # Strategy 3: Limit Token Output
+            additional_instructions=additional_instructions,
+            max_completion_tokens=10000  # Increased for detailed assessments
         )
         
         import time
@@ -165,10 +184,29 @@ class AzureAgentClient:
 
 
 
-    def send_message_stream(self, thread_id: str, message: str, role: str = "intake"):
+    def send_message_stream(self, thread_id: str, message: str, role: str = "intake", user_data: dict = None):
         """Streams message to a specific agent using Azure generator API."""
         agent_id = self.get_agent_id(role)
         
+        # Add message to thread
+        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
+        
+        # Prepare personalization instructions if user_data is provided
+        additional_instructions = None
+        if user_data:
+            name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or "Guest"
+            email = user_data.get('email', 'unknown')
+            first_name = user_data.get('first_name') or name.split()[0] or "there"
+            
+            # Additional run instructions
+            additional_instructions = (
+                f"You ARE talking to {name} (Email: {email}). "
+                "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
+            )
+            # Inject context into message for absolute certainty
+            message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
+
         # Add message to thread
         context_message = f"[System Context: thread_id={thread_id}]\n{message}"
         self.client.agents.create_message(
@@ -182,7 +220,8 @@ class AzureAgentClient:
                 with self.client.agents.create_stream(
                     thread_id=thread_id,
                     assistant_id=agent_id,
-                    max_completion_tokens=500
+                    additional_instructions=additional_instructions,
+                    max_completion_tokens=10000
                 ) as stream:
                     requires_action = False
                     run_id = None
@@ -287,16 +326,16 @@ def create_thread() -> str:
     return client.create_thread()
 
 
-def send_message(thread_id: str, message: str, role: str = "intake") -> dict:
+def send_message(thread_id: str, message: str, role: str = "intake", user_data: dict = None) -> dict:
     """
     Sends a message to the thread, runs the agent, and returns response.
     """
     client = get_project_client()
-    return client.send_message(thread_id, message, role=role)
+    return client.send_message(thread_id, message, role=role, user_data=user_data)
 
-def send_message_stream(thread_id: str, message: str, role: str = "intake"):
+def send_message_stream(thread_id: str, message: str, role: str = "intake", user_data: dict = None):
     """
     Sends a message to the thread, runs the agent via stream, and returns a generator.
     """
     client = get_project_client()
-    return client.send_message_stream(thread_id, message, role=role)
+    return client.send_message_stream(thread_id, message, role=role, user_data=user_data)
