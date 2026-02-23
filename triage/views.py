@@ -127,16 +127,22 @@ def patient_intake(request):
     if not thread_id:
         thread_id = request.session.get('triage_thread_id')
     
-    # 3. Create fresh thread if still not found
+    # 3. Create fresh thread and session if still not found
     if not thread_id:
         try:
             thread_id = create_thread()
             request.session['triage_thread_id'] = thread_id
             
-            # If authenticated, we could pre-create a PENDING session here,
-            # but the agent usually does it via tools. 
-            # For pure persistence before tool call, we rely on the session ID
-            # until a TriageSession object is actually created.
+            # Eagerly create a shell session if authenticated
+            if request.user.is_authenticated:
+                patient = getattr(request.user, 'patient_profile', None)
+                if patient:
+                    TriageSession.objects.create(
+                        patient=patient,
+                        thread_id=thread_id,
+                        status='PENDING',
+                        active_agent_role='intake'
+                    )
         except Exception as e:
             thread_id = "local_mock_thread"
 
@@ -197,13 +203,17 @@ def api_chat(request):
         response_data = send_message(thread_id, context_msg, role=role, user_data=user_data)
         ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
         run_status = response_data.get('run_status', 'failed')
-        
-        # 3. Check if the role changed during the run (via tool call)
+
+        # 3. Log messages to database for persistence
+        if session:
+            ChatMessage.objects.create(session=session, sender='patient', message=user_message)
+            ChatMessage.objects.create(session=session, sender='agent', message=ai_response_text)
+                
+        # 4. Check if the role changed during the run (via tool call)
         if session:
             session.refresh_from_db()
             new_role = session.active_agent_role
             if new_role != role:
-                print(f"--- Role Transition Detected: {role} -> {new_role} ---")
                 role = new_role
                 
     except Exception as e:
@@ -287,8 +297,28 @@ def api_chat_stream(request):
 
     # Try sending message
     try:
+        # Log user message immediately
+        if session:
+            ChatMessage.objects.create(session=session, sender='patient', message=user_message)
+
         generator = send_message_stream(thread_id, context_msg, role=role, user_data=user_data)
-        return StreamingHttpResponse(generator, content_type='text/event-stream')
+        
+        # Wrap generator to log the final agent response
+        def logging_generator(gen, sess):
+            full_content = ""
+            for chunk in gen:
+                try:
+                    data = json.loads(chunk.strip())
+                    if data.get('type') == 'chunk':
+                        full_content += data.get('content', '')
+                except:
+                    pass
+                yield chunk
+            
+            if sess and full_content:
+                ChatMessage.objects.create(session=sess, sender='agent', message=full_content)
+
+        return StreamingHttpResponse(logging_generator(generator, session), content_type='text/event-stream')
     except Exception as e:
         error_str = str(e)
         if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower():
@@ -383,6 +413,24 @@ def doctor_action(request, session_id):
 # ──────────────────────────────────────────────
 # REST API ViewSets
 # ──────────────────────────────────────────────
+
+@login_required
+def api_chat_history(request, thread_id):
+    """Fetch all previous messages for a specific thread."""
+    session = TriageSession.objects.filter(thread_id=thread_id).order_by('-created_at').first()
+    if not session:
+        return JsonResponse({'messages': []})
+    
+    messages = []
+    for msg in session.chat_messages.all().order_by('created_at'):
+        messages.append({
+            'role': msg.sender,
+            'content': msg.message,
+            'timestamp': msg.created_at.isoformat()
+        })
+    
+    return JsonResponse({'messages': messages})
+
 
 class PatientViewSet(viewsets.ModelViewSet):
     queryset = Patient.objects.all()
