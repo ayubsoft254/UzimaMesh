@@ -91,7 +91,7 @@ def triage_updates(request):
 
 
 try:
-    from .services import create_thread, send_message
+    from .services import create_thread, send_message, send_message_stream
 except ImportError:
     # Fallback/mock if azure-ai-projects isn't ready
     def create_thread(): return "mock_thread_id"
@@ -188,7 +188,7 @@ def api_chat(request):
     except Exception as e:
         error_str = str(e)
         # Handle expired/invalid threads by automatically creating a new one
-        if "No thread found with id" in error_str.lower() or "not found" in error_str.lower():
+        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower():
             try:
                 print("Stale thread detected. Creating a new thread session...")
                 new_thread_id = create_thread()
@@ -249,7 +249,7 @@ def api_chat_stream(request):
         return StreamingHttpResponse(generator, content_type='text/event-stream')
     except Exception as e:
         error_str = str(e)
-        if "No thread found with id" in error_str.lower() or "not found" in error_str.lower():
+        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower():
             try:
                 print("Stale thread detected. Creating a new thread session...")
                 new_thread_id = create_thread()
