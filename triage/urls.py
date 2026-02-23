@@ -18,6 +18,7 @@ urlpatterns = [
     path('patient/', views.patient_dashboard, name='patient_dashboard'),
     path('intake/', views.patient_intake, name='patient_intake'),
     path('api/chat/', views.api_chat, name='api_chat'),
+    path('api/chat/stream/', views.api_chat_stream, name='api_chat_stream'),
 
     # Doctor Command Center
     path('doctor/', views.doctor_dashboard, name='doctor_dashboard'),

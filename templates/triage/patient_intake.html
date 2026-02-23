@@ -238,7 +238,7 @@
         showTyping();
 
         try {
-            const response = await fetch('/api/chat/', {
+            const response = await fetch('/api/chat/stream/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -251,19 +251,63 @@
                 })
             });
 
-            const data = await response.json();
             hideTyping();
 
-            if (data.error) {
+            if (!response.ok) {
                 addMessage("I experienced a connection issue. Please try again.", 'agent');
-                console.error(data.error);
                 return;
             }
 
-            addMessage(data.message, 'agent');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex justify-start msg-agent';
+            wrapper.innerHTML = `
+                <div class="flex items-start space-x-3 max-w-[85%]">
+                    <div class="w-8 h-8 rounded-full bg-mesh-500/20 border border-mesh-500/30 flex items-center justify-center flex-shrink-0 mt-1">
+                        <svg class="w-4 h-4 text-mesh-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-mesh-500/60 font-bold uppercase tracking-widest mb-1">AI Assistant</p>
+                        <div class="glass px-5 py-3.5 rounded-2xl rounded-bl-md">
+                            <p class="text-sm text-neutral-200 leading-relaxed message-content"></p>
+                        </div>
+                    </div>
+                </div>`;
+            
+            chatMessages.appendChild(wrapper);
+            const contentEl = wrapper.querySelector('.message-content');
+            let fullText = "";
 
-            // If the agent determines the intake is complete, we could look for a specific 
-            // signal in the response to show the urgency card. For now, we rely solely on chat.
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunkStr = decoder.decode(value, { stream: true });
+                const lines = chunkStr.split('\\n\\n'); // Double newline indicates SSE block
+                
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const data = JSON.parse(line);
+                        if (data.type === 'chunk') {
+                            fullText += data.content;
+                            contentEl.innerHTML = fullText.replace(/\\n/g, '<br>');
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        } else if (data.type === 'error') {
+                            fullText += "<br><span class='text-red-400'>[System: " + data.content + "]</span>";
+                            contentEl.innerHTML = fullText.replace(/\\n/g, '<br>');
+                        } else if (data.type === 'done') {
+                            // Run completed
+                        }
+                    } catch (e) {
+                        // ignore malformed chunks until fully received
+                    }
+                }
+            }
 
         } catch (error) {
             hideTyping();
