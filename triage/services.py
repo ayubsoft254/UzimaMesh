@@ -232,6 +232,7 @@ class AzureAgentClient:
                         if not isinstance(event_tuple, tuple) or len(event_tuple) != 2:
                             continue
                         event_type, event_data = event_tuple
+                        print(f"DEBUG STREAM EVENT: {event_type}")
                         
                         if event_type == "thread.run.created":
                             run_id = getattr(event_data, "id", None)
