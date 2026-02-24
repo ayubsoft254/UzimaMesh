@@ -56,22 +56,22 @@
         </div>
         <a href="{% url 'account_reset_password' %}"
             class="text-xs font-bold text-mesh-500 hover:text-white transition-colors">
-            {% trans "Forgot Token?" %}
+            {% trans "Forgot Password?" %}
         </a>
     </div>
 
     <button
         class="w-full bg-mesh-500 hover:bg-mesh-600 text-white font-bold py-4 rounded-fluent shadow-neon transform transition-all active:scale-95 uppercase tracking-wider"
         type="submit">
-        {% trans "Initialize Session" %}
+        {% trans "Login" %}
     </button>
 </form>
 
 <div class="mt-8 pt-8 border-t border-white/5 text-center">
     <p class="text-xs text-neutral-500">
         {% blocktrans %}
-        Unauthorized access to this node is prohibited. Request an <a href="{{ signup_url }}"
-            class="text-mesh-500 hover:text-white font-bold underline transition-colors">Authorization Token</a> if you
+        Unauthorized access to this platform is prohibited. Register an <a href="{{ signup_url }}"
+            class="text-mesh-500 hover:text-white font-bold underline transition-colors">Account</a> if you
         are new.
         {% endblocktrans %}
     </p>
