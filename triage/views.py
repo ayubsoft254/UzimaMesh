@@ -206,8 +206,8 @@ def api_chat(request):
 
         # 3. Log messages to database for persistence
         if session:
-            ChatMessage.objects.create(session=session, sender='patient', message=user_message)
-            ChatMessage.objects.create(session=session, sender='agent', message=ai_response_text)
+            ChatMessage.objects.create(session=session, role='patient', content=user_message)
+            ChatMessage.objects.create(session=session, role='agent', content=ai_response_text)
                 
         # 4. Check if the role changed during the run (via tool call)
         if session:
@@ -299,7 +299,7 @@ def api_chat_stream(request):
     try:
         # Log user message immediately
         if session:
-            ChatMessage.objects.create(session=session, sender='patient', message=user_message)
+            ChatMessage.objects.create(session=session, role='patient', content=user_message)
 
         generator = send_message_stream(thread_id, context_msg, role=role, user_data=user_data)
         
@@ -316,7 +316,7 @@ def api_chat_stream(request):
                 yield chunk
             
             if sess and full_content:
-                ChatMessage.objects.create(session=sess, sender='agent', message=full_content)
+                ChatMessage.objects.create(session=sess, role='agent', content=full_content)
 
         return StreamingHttpResponse(logging_generator(generator, session), content_type='text/event-stream')
     except Exception as e:

@@ -115,7 +115,7 @@ class ChatMessage(models.Model):
     session = models.ForeignKey(
         TriageSession,
         on_delete=models.CASCADE,
-        related_name='messages',
+        related_name='chat_messages',
     )
     role = models.CharField(max_length=10, choices=ROLE_CHOICES)
     content = models.TextField()
