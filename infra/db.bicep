@@ -26,15 +26,7 @@ resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-03-01-pr
   }
 }
 
-// Enable PgBouncer
-resource pgbouncerConfig 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-03-01-preview' = {
-  name: 'pgbouncer.enabled'
-  parent: postgresServer
-  properties: {
-    value: 'true'
-    source: 'user-override'
-  }
-}
+
 
 // Allows other Azure services (like your App Service) to connect
 resource firewallAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-03-01-preview' = {
@@ -46,4 +38,4 @@ resource firewallAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallR
   }
 }
 
-output connectionString string = 'postgres://${adminUser}:${adminPassword}@${postgresServer.properties.fullyQualifiedDomainName}:6432/postgres?sslmode=require'
+output connectionString string = 'postgres://${adminUser}:${adminPassword}@${postgresServer.properties.fullyQualifiedDomainName}/postgres?sslmode=require'
