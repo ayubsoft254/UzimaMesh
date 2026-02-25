@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'django_htmx',
     'corsheaders',
+    # 'widget_tweaks',
 
     # Local apps
     'triage',
@@ -168,6 +169,9 @@ ACCOUNT_AUTHENTICATION_METHOD = 'email'
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_EMAIL_VERIFICATION = 'none'  # Simplified for initial build
+ACCOUNT_FORMS = {
+    "signup": "triage.forms.CustomSignupForm",
+}
 
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/'

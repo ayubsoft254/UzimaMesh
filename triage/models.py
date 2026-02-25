@@ -11,10 +11,15 @@ class Patient(models.Model):
         blank=True,
         related_name='patient_profile',
     )
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+
+    GENDER_CHOICES = (
+        ('male', 'Male'),
+        ('female', 'Female'),
+        ('other', 'Other'),
+    )
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
     medical_history = models.TextField(blank=True)
     current_prescriptions = models.TextField(
         blank=True,
