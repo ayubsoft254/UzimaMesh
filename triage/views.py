@@ -219,14 +219,14 @@ def api_chat(request):
     except Exception as e:
         error_str = str(e)
         # Handle expired/invalid threads by automatically creating a new one
-        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower():
+        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower() or "active" in error_str.lower():
             try:
-                print("Stale thread detected. Creating a new thread session...")
+                print("Stale or locked thread detected. Creating a new thread session...")
                 new_thread_id = create_thread()
                 request.session['triage_thread_id'] = new_thread_id
                 
                 # Retry sending the message with the new thread ID
-                response_data = send_message(new_thread_id, context_msg, role="intake")
+                response_data = send_message(new_thread_id, context_msg, role="intake", user_data=user_data)
                 ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
                 run_status = response_data.get('run_status', 'failed')
                 
@@ -321,13 +321,13 @@ def api_chat_stream(request):
         return StreamingHttpResponse(logging_generator(generator, session), content_type='text/event-stream')
     except Exception as e:
         error_str = str(e)
-        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower():
+        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower() or "active" in error_str.lower():
             try:
-                print("Stale thread detected. Creating a new thread session...")
+                print("Stale or locked thread detected. Creating a new thread session...")
                 new_thread_id = create_thread()
                 request.session['triage_thread_id'] = new_thread_id
                 
-                generator = send_message_stream(new_thread_id, context_msg, role="intake")
+                generator = send_message_stream(new_thread_id, context_msg, role="intake", user_data=user_data)
                 return StreamingHttpResponse(generator, content_type='text/event-stream')
             except Exception as retry_e:
                 def err_gen():
