@@ -416,17 +416,18 @@ def doctor_action(request, session_id):
 
 @login_required
 def api_chat_history(request, thread_id):
-    """Fetch all previous messages for a specific thread."""
-    session = TriageSession.objects.filter(thread_id=thread_id).order_by('-created_at').first()
-    if not session:
-        return JsonResponse({'messages': []})
+    """Fetch all previous messages for a specific thread, potentially across sessions."""
+    # Query messages by thread_id through the session association
+    chat_messages = ChatMessage.objects.filter(
+        session__thread_id=thread_id
+    ).select_related('session').order_by('timestamp')
     
     messages = []
-    for msg in session.chat_messages.all().order_by('created_at'):
+    for msg in chat_messages:
         messages.append({
-            'role': msg.sender,
-            'content': msg.message,
-            'timestamp': msg.created_at.isoformat()
+            'role': msg.role,
+            'content': msg.content,
+            'timestamp': msg.timestamp.isoformat()
         })
     
     return JsonResponse({'messages': messages})
