@@ -7,6 +7,9 @@ param resourceGroupName string = ''
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   name: !empty(resourceGroupName) ? resourceGroupName : 'rg-${environmentName}'
   location: location
+  tags: {
+    'azd-env-name': environmentName
+  }
 }
 
 // 1. Azure AI Foundry Project
