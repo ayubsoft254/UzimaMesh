@@ -67,11 +67,18 @@ class AzureAgentClient:
             first_name = user_data.get('first_name') or name.split()[0] or "there"
             
             # Additional run instructions
-            additional_instructions = (
-                f"You ARE talking to {name} (Email: {email}). "
-                "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
-            )
+            if role == "intake":
+                additional_instructions = (
+                    f"You ARE talking to {name} (Email: {email}). "
+                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                    f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
+                )
+            else:
+                additional_instructions = (
+                    f"You ARE talking to {name} (Email: {email}). "
+                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                    "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+                )
             # Inject context into message for absolute certainty
             message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
 
@@ -152,6 +159,44 @@ class AzureAgentClient:
                             run_id=run.id,
                             tool_outputs=tool_outputs
                         )
+                        
+                        # Check if handoff occurred
+                        handoff_target = None
+                        for tc in tool_calls:
+                            if tc.function.name == "handoff_to_agent":
+                                try:
+                                    args = json.loads(tc.function.arguments)
+                                    handoff_target = args.get("target_role")
+                                except:
+                                    pass
+                        
+                        if handoff_target:
+                            # We just wait for the current run to finish (it will likely be blank)
+                            while run.status in ["queued", "in_progress"]:
+                                time.sleep(0.5)
+                                run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
+                            
+                            # Automatically trigger the new agent
+                            new_agent_id = self.get_agent_id(handoff_target)
+                            new_instructions = (
+                                f"You ARE talking to user. THEY ARE ALREADY LOGGED IN. "
+                                "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+                            )
+                            
+                            self.client.agents.create_message(
+                                thread_id=thread_id,
+                                role="user",
+                                content=f"[System Context: User was successfully transferred to {handoff_target}. Please introduce yourself and continue.]"
+                            )
+                            
+                            run = self.client.agents.create_run(
+                                thread_id=thread_id,
+                                assistant_id=new_agent_id,
+                                additional_instructions=new_instructions,
+                                max_completion_tokens=10000
+                            )
+                            role = handoff_target # update role for final return
+                            
                     else:
                         break
                 else:
@@ -197,11 +242,18 @@ class AzureAgentClient:
             first_name = user_data.get('first_name') or name.split()[0] or "there"
             
             # Additional run instructions
-            additional_instructions = (
-                f"You ARE talking to {name} (Email: {email}). "
-                "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
-            )
+            if role == "intake":
+                additional_instructions = (
+                    f"You ARE talking to {name} (Email: {email}). "
+                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                    f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
+                )
+            else:
+                additional_instructions = (
+                    f"You ARE talking to {name} (Email: {email}). "
+                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                    "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+                )
             # Inject context into message for absolute certainty
             message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
 
@@ -287,6 +339,39 @@ class AzureAgentClient:
                                 tool_outputs=tool_outputs
                             ) as new_stream:
                                 yield from process_stream(new_stream)
+
+                        # Check if a handoff occurred to auto-trigger the next agent
+                        for tc in tool_calls:
+                            if tc.function.name == "handoff_to_agent":
+                                try:
+                                    args = json.loads(tc.function.arguments)
+                                    target_role = args.get("target_role")
+                                    if target_role:
+                                        yield json.dumps({"type": "chunk", "content": f"\n\n*[System: Transferring you to the {target_role} agent...]*\n\n"}) + "\n\n"
+                                        
+                                        new_agent_id = self.get_agent_id(target_role)
+                                        new_instructions = (
+                                            f"You ARE talking to user. THEY ARE ALREADY LOGGED IN. "
+                                            "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+                                        )
+                                        
+                                        # Auto-trigger the new agent without requiring the user to send a message
+                                        self.client.agents.create_message(
+                                            thread_id=thread_id,
+                                            role="user",
+                                            content=f"[System Context: User was successfully transferred to {target_role}. Please introduce yourself and continue.]"
+                                        )
+                                        
+                                        with self.client.agents.create_stream(
+                                            thread_id=thread_id,
+                                            assistant_id=new_agent_id,
+                                            additional_instructions=new_instructions,
+                                            max_completion_tokens=10000
+                                        ) as next_agent_stream:
+                                            yield from process_stream(next_agent_stream)
+                                except Exception as e:
+                                    print(f"Error auto-triggering handoff: {e}")
+                                break
 
                 with self.client.agents.create_stream(
                     thread_id=thread_id,
