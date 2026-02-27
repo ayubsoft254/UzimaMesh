@@ -118,33 +118,49 @@ def patient_intake(request):
                 status__in=['PENDING', 'IN_PROGRESS']
             ).order_by('-created_at').first()
             
-            if latest_session and latest_session.thread_id:
-                thread_id = latest_session.thread_id
-                # Also sync to session
-                request.session['triage_thread_id'] = thread_id
+            if latest_session:
+                if latest_session.thread_id:
+                    thread_id = latest_session.thread_id
+                    request.session['triage_thread_id'] = thread_id
+                else:
+                    # Update existing session with new thread_id
+                    try:
+                        thread_id = create_thread()
+                        latest_session.thread_id = thread_id
+                        latest_session.save()
+                        request.session['triage_thread_id'] = thread_id
+                    except Exception:
+                        thread_id = "local_mock_thread"
+                        latest_session.thread_id = thread_id
+                        latest_session.save()
+                        request.session['triage_thread_id'] = thread_id
     
     # 2. Fallback to Django session if not found in DB
-    if not thread_id:
+    if not thread_id or thread_id == "None":
         thread_id = request.session.get('triage_thread_id')
     
     # 3. Create fresh thread and session if still not found
-    if not thread_id:
+    if not thread_id or thread_id == "None":
         try:
             thread_id = create_thread()
-            request.session['triage_thread_id'] = thread_id
-            
-            # Eagerly create a shell session if authenticated
-            if request.user.is_authenticated:
-                patient = getattr(request.user, 'patient_profile', None)
-                if patient:
-                    TriageSession.objects.create(
-                        patient=patient,
-                        thread_id=thread_id,
-                        status='PENDING',
-                        active_agent_role='intake'
-                    )
-        except Exception as e:
+        except Exception:
             thread_id = "local_mock_thread"
+            
+        request.session['triage_thread_id'] = thread_id
+        
+        # Eagerly create a shell session if authenticated
+        if request.user.is_authenticated:
+            patient = getattr(request.user, 'patient_profile', None)
+            if patient:
+                # Use get_or_create to avoid duplicates if user refreshes before chat starts
+                TriageSession.objects.get_or_create(
+                    patient=patient,
+                    status='PENDING',
+                    defaults={
+                        'thread_id': thread_id,
+                        'active_agent_role': 'intake'
+                    }
+                )
 
     return render(request, 'triage/patient_intake.html', {
         'thread_id': thread_id
@@ -196,6 +212,12 @@ def api_chat(request):
                     'last_name': request.user.last_name,
                     'email': request.user.email
                 }
+            
+            # Injecting the rolling AI summary to maintain diagnostic context 
+            # while truncating raw history messages.
+            if session and session.ai_summary:
+                user_data['rolling_summary'] = session.ai_summary
+                
             print(f"DEBUG VIEWS: Found user_data for {request.user.username}: {user_data}")
         else:
             print("DEBUG VIEWS: User not authenticated.")
