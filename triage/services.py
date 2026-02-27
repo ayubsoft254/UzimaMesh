@@ -428,6 +428,9 @@ class AzureAgentClient:
                     yield from process_stream(initial_stream)
 
             except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception(f"Failed to execute stream for thread {thread_id}")
                 yield json.dumps({"type": "error", "content": str(e)}) + "\n\n"
         
         return stream_generator()
@@ -443,8 +446,14 @@ def get_project_client() -> AzureAgentClient:
 
 def create_thread() -> str:
     """Creates a new agent thread and returns its ID."""
-    client = get_project_client()
-    return client.create_thread()
+    try:
+        client = get_project_client()
+        return client.create_thread()
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception("Failed to create Azure AI thread")
+        raise e
 
 
 def send_message(thread_id: str, message: str, role: str = "intake", user_data: dict = None) -> dict:

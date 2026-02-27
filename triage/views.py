@@ -143,7 +143,10 @@ def patient_intake(request):
     if not thread_id or thread_id == "None":
         try:
             thread_id = create_thread()
-        except Exception:
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Failed to create thread during patient intake")
             thread_id = "local_mock_thread"
             
         request.session['triage_thread_id'] = thread_id
@@ -156,8 +159,8 @@ def patient_intake(request):
                 TriageSession.objects.get_or_create(
                     patient=patient,
                     status='PENDING',
+                    thread_id=thread_id,
                     defaults={
-                        'thread_id': thread_id,
                         'active_agent_role': 'intake'
                     }
                 )
@@ -238,6 +241,30 @@ def api_chat(request):
             if new_role != role:
                 role = new_role
                 
+        # 5. Trigger automatic rolling summary if message count is a multiple of 5
+        if session:
+            msg_count = ChatMessage.objects.filter(session=session).count()
+            # We trigger a background summarize every 5 messages to ensure truncation 
+            # (which removes the last 10) never loses context.
+            if msg_count > 0 and msg_count % 5 == 0:
+                import threading
+                from .services import get_project_client
+                def update_summary(session_id, tid):
+                    try:
+                        sess = TriageSession.objects.get(id=session_id)
+                        client = get_project_client()
+                        # Use analysis or default agent to summarize
+                        summary_prompt = "Please provide a concise medical summary of the patient's symptoms and state so far, ignoring pleasantries."
+                        resp = client.send_message(tid, summary_prompt, role="analysis")
+                        if resp and resp.get("content"):
+                            sess.ai_summary = resp["content"]
+                            sess.save()
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception("Failed to auto-update rolling summary")
+                        
+                threading.Thread(target=update_summary, args=(session.id, thread_id)).start()
+                
     except Exception as e:
         error_str = str(e)
         # Handle expired/invalid threads by automatically creating a new one
@@ -254,9 +281,15 @@ def api_chat(request):
                 
                 # We do not return an error here; we gracefully handled it.
             except Exception as retry_e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to retry sending message to Azure Agent")
                 ai_response_text = f"An error occurred connecting to the AI Agent (Retry failed): {str(retry_e)}"
                 run_status = 'error'
         else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Error occurred connecting to the AI Agent")
             ai_response_text = f"An error occurred connecting to the AI Agent: {error_str}"
             run_status = 'error'
 
@@ -337,8 +370,29 @@ def api_chat_stream(request):
                     pass
                 yield chunk
             
+            
             if sess and full_content:
                 ChatMessage.objects.create(session=sess, role='agent', content=full_content)
+                
+                # Trigger automatic rolling summary if message count is a multiple of 5
+                msg_count = ChatMessage.objects.filter(session=sess).count()
+                if msg_count > 0 and msg_count % 5 == 0:
+                    import threading
+                    from .services import get_project_client
+                    def update_summary(session_id, tid):
+                        try:
+                            s = TriageSession.objects.get(id=session_id)
+                            client = get_project_client()
+                            summary_prompt = "Please provide a concise medical summary of the patient's symptoms and state so far, ignoring pleasantries."
+                            resp = client.send_message(tid, summary_prompt, role="analysis")
+                            if resp and resp.get("content"):
+                                s.ai_summary = resp["content"]
+                                s.save()
+                        except Exception as e:
+                            import logging
+                            logging.getLogger(__name__).exception("Failed to auto-update rolling summary in stream")
+                            
+                    threading.Thread(target=update_summary, args=(sess.id, thread_id)).start()
 
         return StreamingHttpResponse(logging_generator(generator, session), content_type='text/event-stream')
     except Exception as e:
@@ -352,10 +406,16 @@ def api_chat_stream(request):
                 generator = send_message_stream(new_thread_id, context_msg, role="intake", user_data=user_data)
                 return StreamingHttpResponse(generator, content_type='text/event-stream')
             except Exception as retry_e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to retry sending message stream to Azure Agent")
                 def err_gen():
                     yield json.dumps({"type": "error", "content": f"Retry failed: {str(retry_e)}"}) + "\n\n"
                 return StreamingHttpResponse(err_gen(), content_type='text/event-stream')
         else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Error occurred connecting stream to the AI Agent")
             def err_gen():
                 yield json.dumps({"type": "error", "content": f"Error: {error_str}"}) + "\n\n"
             return StreamingHttpResponse(err_gen(), content_type='text/event-stream')
