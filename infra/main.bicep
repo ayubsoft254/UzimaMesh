@@ -42,5 +42,6 @@ module web './appservice.bicep' = {
     location: location
     databaseUrl: db.outputs.connectionString
     aiFoundryEndpoint: aiFoundry.outputs.endpoint
+    instanceCount: 2
   }
 }

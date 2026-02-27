@@ -2,11 +2,15 @@ param name string
 param location string
 param databaseUrl string
 param aiFoundryEndpoint string
+param instanceCount int = 2
 
 resource appPlan 'Microsoft.Web/serverfarms@2022-03-01' = {
   name: '${name}-plan'
   location: location
-  sku: { name: 'B1' }
+  sku: {
+    name: 'S1'
+    capacity: instanceCount
+  }
   kind: 'linux'
   properties: { reserved: true }
 }
