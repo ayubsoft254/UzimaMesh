@@ -129,18 +129,27 @@ def patient_intake(request):
                         latest_session.thread_id = thread_id
                         latest_session.save()
                         request.session['triage_thread_id'] = thread_id
-                    except Exception:
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.exception("Failed to create thread during session recovery")
                         thread_id = "local_mock_thread"
                         latest_session.thread_id = thread_id
                         latest_session.save()
                         request.session['triage_thread_id'] = thread_id
     
+    # Clean up any legacy string "None" values
+    if thread_id == "None":
+        thread_id = None
+
     # 2. Fallback to Django session if not found in DB
-    if not thread_id or thread_id == "None":
+    if not thread_id:
         thread_id = request.session.get('triage_thread_id')
+        if thread_id == "None":
+            thread_id = None
     
     # 3. Create fresh thread and session if still not found
-    if not thread_id or thread_id == "None":
+    if not thread_id:
         try:
             thread_id = create_thread()
         except Exception as e:

@@ -173,7 +173,7 @@
     const inputBar = document.getElementById('input-bar');
 
     // Thread ID provided by Django context
-    const threadId = "{{ thread_id }}";
+    const threadId = "{{ thread_id|default_if_none:'' }}";
 
     function addMessage(content, role) {
         const isAgent = role === 'agent';
