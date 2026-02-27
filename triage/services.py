@@ -80,6 +80,12 @@ class AzureAgentClient:
                     "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
                 )
             # Inject context into message for absolute certainty
+            if user_data.get('rolling_summary'):
+                additional_instructions += (
+                    f"\n\nCRITICAL CONTEXT (PREVIOUS SUMMARY): \n{user_data['rolling_summary']}\n"
+                    "Use this summary to understand the patient's history so far, as recent raw messages may be truncated."
+                )
+            
             message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
 
         context_message = f"[System Context: thread_id={thread_id}]\n{message}"
@@ -95,7 +101,8 @@ class AzureAgentClient:
             thread_id=thread_id,
             assistant_id=agent_id,
             additional_instructions=additional_instructions,
-            max_completion_tokens=10000  # Increased for detailed assessments
+            max_completion_tokens=1000,
+            truncation_strategy={"type": "last_messages", "last_messages": 10}
         )
         
         import time
@@ -193,7 +200,8 @@ class AzureAgentClient:
                                 thread_id=thread_id,
                                 assistant_id=new_agent_id,
                                 additional_instructions=new_instructions,
-                                max_completion_tokens=10000
+                                max_completion_tokens=1000,
+                                truncation_strategy={"type": "last_messages", "last_messages": 10}
                             )
                             role = handoff_target # update role for final return
                             
@@ -255,6 +263,12 @@ class AzureAgentClient:
                     "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
                 )
             # Inject context into message for absolute certainty
+            if user_data.get('rolling_summary'):
+                additional_instructions += (
+                    f"\n\nCRITICAL CONTEXT (PREVIOUS SUMMARY): \n{user_data['rolling_summary']}\n"
+                    "Use this summary to understand the patient's history so far, as recent raw messages may be truncated."
+                )            
+
             message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
 
         # Add message to thread
@@ -366,7 +380,8 @@ class AzureAgentClient:
                                             thread_id=thread_id,
                                             assistant_id=new_agent_id,
                                             additional_instructions=new_instructions,
-                                            max_completion_tokens=10000
+                                            max_completion_tokens=1000,
+                                            truncation_strategy={"type": "last_messages", "last_messages": 10}
                                         ) as next_agent_stream:
                                             yield from process_stream(next_agent_stream)
                                 except Exception as e:
@@ -377,7 +392,8 @@ class AzureAgentClient:
                     thread_id=thread_id,
                     assistant_id=agent_id,
                     additional_instructions=additional_instructions,
-                    max_completion_tokens=10000
+                    max_completion_tokens=1000,
+                    truncation_strategy={"type": "last_messages", "last_messages": 10}
                 ) as initial_stream:
                     yield from process_stream(initial_stream)
 
