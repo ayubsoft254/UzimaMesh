@@ -7,6 +7,7 @@ from django.conf import settings
 import threading
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
+from azure.core.credentials import AzureKeyCredential
 
 # Global thread-safe token cache
 _token_cache = None
@@ -20,7 +21,10 @@ class CachedCredential:
         
         # Initialize credential lazily to avoid blocking imports
         if _global_cred is None:
-            _global_cred = DefaultAzureCredential()
+            _global_cred = DefaultAzureCredential(
+                exclude_developer_cli_credential=True,
+                exclude_powershell_credential=True
+            )
             
         import time
         now = time.time()
@@ -67,9 +71,17 @@ class AzureAgentClient:
         # Construct connection string
         host = endpoint.replace("https://", "").rstrip("/")
         conn_str = f"{host};{sub_id};{rg_name};{project_name}"
+        
+        # Method 1: Instant API Key Authentication (Bypasses local Az CLI check)
+        api_key = os.getenv("AZURE_AI_API_KEY")
+        if api_key:
+            auth_credential = AzureKeyCredential(api_key)
+        else:
+            # Method 2: Fallback to Managed Identity or Interactive CLI
+            auth_credential = CachedCredential()
 
         self.client = AIProjectClient.from_connection_string(
-            credential=CachedCredential(),
+            credential=auth_credential,
             conn_str=conn_str
         )
 
