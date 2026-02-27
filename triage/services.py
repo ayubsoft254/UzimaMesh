@@ -4,6 +4,39 @@ import time
 import os
 from typing import Dict, Any
 from django.conf import settings
+import threading
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+
+# Global thread-safe token cache
+_token_cache = None
+_token_expires_at = 0
+_token_lock = threading.Lock()
+_global_cred = None
+
+class CachedCredential:
+    def get_token(self, *scopes, **kwargs):
+        global _token_cache, _token_expires_at, _token_lock, _global_cred
+        
+        # Initialize credential lazily to avoid blocking imports
+        if _global_cred is None:
+            _global_cred = DefaultAzureCredential()
+            
+        import time
+        now = time.time()
+        
+        # Fast path (no lock): if token is valid and not close to expiry
+        if _token_cache and now < _token_expires_at - 300:
+            return _token_cache
+        
+        # Slow path (with lock): fetch new token
+        with _token_lock:
+            # Double-checked locking
+            now = time.time()
+            if not _token_cache or now > _token_expires_at - 300:
+                _token_cache = _global_cred.get_token(*scopes, **kwargs)
+                _token_expires_at = _token_cache.expires_on
+            return _token_cache
 
 
 class AzureAgentClient:
@@ -35,11 +68,8 @@ class AzureAgentClient:
         host = endpoint.replace("https://", "").rstrip("/")
         conn_str = f"{host};{sub_id};{rg_name};{project_name}"
 
-        from azure.ai.projects import AIProjectClient
-        from azure.identity import DefaultAzureCredential
-        
         self.client = AIProjectClient.from_connection_string(
-            credential=DefaultAzureCredential(),
+            credential=CachedCredential(),
             conn_str=conn_str
         )
 
