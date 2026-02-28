@@ -6,9 +6,26 @@ from typing import Dict, Any
 from django.conf import settings
 import threading
 from azure.ai.projects import AIProjectClient
+from azure.core.credentials import AzureKeyCredential, AccessToken
 from azure.identity import DefaultAzureCredential
 
-# Global thread-safe token cache
+
+class ApiKeyCredential:
+    """
+    TokenCredential implementation that uses a static API key as the bearer token.
+    The Azure AI Projects SDK internally calls get_token() on all credentials —
+    this wrapper satisfies that contract without requiring az login.
+    """
+    def __init__(self, api_key: str):
+        self._api_key = api_key
+        # Set expiry far in the future (year 2099) so it never triggers a refresh
+        self._token = AccessToken(token=api_key, expires_on=4102444800)
+
+    def get_token(self, *scopes, **kwargs) -> AccessToken:
+        return self._token
+
+
+# Legacy cached DefaultAzureCredential (used as fallback only)
 _token_cache = None
 _token_expires_at = 0
 _token_lock = threading.Lock()
@@ -17,26 +34,18 @@ _global_cred = None
 class CachedCredential:
     def get_token(self, *scopes, **kwargs):
         global _token_cache, _token_expires_at, _token_lock, _global_cred
-        
-        # Initialize credential lazily to avoid blocking imports
         if _global_cred is None:
             _global_cred = DefaultAzureCredential()
-            
-        import time
         now = time.time()
-        
-        # Fast path (no lock): if token is valid and not close to expiry
         if _token_cache and now < _token_expires_at - 300:
             return _token_cache
-        
-        # Slow path (with lock): fetch new token
         with _token_lock:
-            # Double-checked locking
             now = time.time()
             if not _token_cache or now > _token_expires_at - 300:
                 _token_cache = _global_cred.get_token(*scopes, **kwargs)
                 _token_expires_at = _token_cache.expires_on
             return _token_cache
+
 
 
 class AzureAgentClient:
@@ -47,7 +56,8 @@ class AzureAgentClient:
         sub_id = os.getenv("AZURE_SUBSCRIPTION_ID")
         rg_name = os.getenv("AZURE_RESOURCE_GROUP", "rg-uzima-mesh")
         project_name = os.getenv("AZURE_AI_PROJECT_NAME", "ai-uzima-mesh-project")
-        
+        api_key = os.getenv("AZURE_AI_API_KEY")
+
         # Agent Mapping
         self.agents = {
             "intake": os.getenv("AZURE_AI_INTAKE_AGENT_ID"),
@@ -58,20 +68,27 @@ class AzureAgentClient:
             "default": os.getenv("AZURE_AI_AGENT_ID")
         }
 
-        if not all([endpoint, sub_id, self.agents["intake"]]):
+        if not all([endpoint, self.agents["intake"]]):
             raise ValueError(
                 "Missing Azure AI configuration. "
-                "Check AZURE_AI_ENDPOINT, AZURE_SUBSCRIPTION_ID, and Agent IDs in .env"
+                "Check AZURE_AI_ENDPOINT and Agent IDs in .env"
             )
 
-        # Construct connection string
+        # Build connection string for AIProjectClient
         host = endpoint.replace("https://", "").rstrip("/")
         conn_str = f"{host};{sub_id};{rg_name};{project_name}"
 
+        # Use CachedCredential which wraps DefaultAzureCredential.
+        # With AZURE_CLIENT_ID + AZURE_CLIENT_SECRET set in .env, 
+        # EnvironmentCredential will automatically authenticate via service principal
+        # — no 'az login' required.
         self.client = AIProjectClient.from_connection_string(
             credential=CachedCredential(),
             conn_str=conn_str
         )
+
+
+
 
     def create_thread(self) -> str:
         """Create a new agent thread."""
@@ -311,16 +328,21 @@ class AzureAgentClient:
         
         def stream_generator():
             try:
-                def process_stream(current_stream):
-                    requires_action = False
+                def process_stream(current_stream, depth=0):
+                    """Process a stream, yielding chunks and handling tool calls inline.
+                    depth prevents infinite recursion (max 3 levels: init → tool_submit → handoff).
+                    """
+                    if depth > 3:
+                        return
+                    
                     run_id = None
                     tool_calls = []
-                    
+
                     for event_tuple in current_stream:
                         if not isinstance(event_tuple, tuple) or len(event_tuple) != 2:
                             continue
                         event_type, event_data = event_tuple
-                        
+
                         if event_type == "thread.run.created":
                             run_id = getattr(event_data, "id", None)
                         elif event_type == "thread.message.delta":
@@ -329,29 +351,25 @@ class AzureAgentClient:
                                     text_val = block.text.value if not isinstance(block, dict) else block["text"]["value"]
                                     yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
                         elif event_type == "thread.run.requires_action":
-                            requires_action = True
                             if hasattr(event_data, 'id'):
                                 run_id = event_data.id
                             if hasattr(event_data, 'required_action') and hasattr(event_data.required_action, 'submit_tool_outputs'):
-                                tool_calls = event_data.required_action.submit_tool_outputs.tool_calls
-                        elif event_type == "thread.run.completed":
-                            yield json.dumps({"type": "done", "run_status": "completed"}) + "\n\n"
-                    
-                    if requires_action and tool_calls and run_id:
+                                tool_calls = list(event_data.required_action.submit_tool_outputs.tool_calls)
+                        # Don't yield 'done' here; we emit it once at the very end.
+
+                    # --- Tool calls phase (runs AFTER the for-loop, outside the stream) ---
+                    if tool_calls and run_id:
                         from mcp_server.server import (
                             create_triage_record, handoff_to_agent, consult_agent, get_doctor_availability
                         )
                         import concurrent.futures
-                        
-                        tool_outputs = []
+
                         def execute_single_tool(tc):
                             func_name = tc.function.name
                             try:
                                 args = json.loads(tc.function.arguments)
                             except json.JSONDecodeError:
                                 args = {}
-                                
-                            output = None
                             try:
                                 if func_name == "create_triage_record":
                                     output = create_triage_record(**args)
@@ -365,58 +383,52 @@ class AzureAgentClient:
                                     output = {"error": f"Unknown tool: {func_name}"}
                             except Exception as e:
                                 output = {"error": str(e)}
-                                
-                            return {
-                                "tool_call_id": tc.id,
-                                "output": json.dumps(output)
-                            }
+                            return {"tool_call_id": tc.id, "output": json.dumps(output)}
 
                         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                             futures = [executor.submit(execute_single_tool, tc) for tc in tool_calls]
-                            for future in concurrent.futures.as_completed(futures):
-                                tool_outputs.append(future.result())
-                                
+                            tool_outputs = [f.result() for f in concurrent.futures.as_completed(futures)]
+
                         if tool_outputs:
                             with self.client.agents.submit_tool_outputs_to_stream(
                                 thread_id=thread_id,
                                 run_id=run_id,
                                 tool_outputs=tool_outputs
-                            ) as new_stream:
-                                yield from process_stream(new_stream)
+                            ) as resubmit_stream:
+                                yield from process_stream(resubmit_stream, depth=depth + 1)
 
-                        # Check if a handoff occurred to auto-trigger the next agent
-                        for tc in tool_calls:
-                            if tc.function.name == "handoff_to_agent":
-                                try:
-                                    args = json.loads(tc.function.arguments)
-                                    target_role = args.get("target_role")
-                                    if target_role:
-                                        yield json.dumps({"type": "chunk", "content": f"\n\n*[System: Transferring you to the {target_role} agent...]*\n\n"}) + "\n\n"
-                                        
-                                        new_agent_id = self.get_agent_id(target_role)
-                                        new_instructions = (
-                                            f"You ARE talking to user. THEY ARE ALREADY LOGGED IN. "
-                                            "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
-                                        )
-                                        
-                                        # Auto-trigger the new agent without requiring the user to send a message
-                                        self.client.agents.create_message(
-                                            thread_id=thread_id,
-                                            role="user",
-                                            content=f"[System Context: User was successfully transferred to {target_role}. Please introduce yourself and continue.]"
-                                        )
-                                        
-                                        with self.client.agents.create_stream(
-                                            thread_id=thread_id,
-                                            assistant_id=new_agent_id,
-                                            additional_instructions=new_instructions,
-                                            max_completion_tokens=1000,
-                                            truncation_strategy={"type": "last_messages", "last_messages": 10}
-                                        ) as next_agent_stream:
-                                            yield from process_stream(next_agent_stream)
-                                except Exception as e:
-                                    print(f"Error auto-triggering handoff: {e}")
-                                break
+                        # --- Handoff phase: auto-trigger next agent ---
+                        # Only at the outermost depth to avoid double-trigger after re-stream.
+                        if depth == 0:
+                            for tc in tool_calls:
+                                if tc.function.name == "handoff_to_agent":
+                                    try:
+                                        args = json.loads(tc.function.arguments)
+                                        target_role = args.get("target_role")
+                                        if target_role:
+                                            new_agent_id = self.get_agent_id(target_role)
+                                            if new_agent_id:
+                                                yield json.dumps({"type": "chunk", "content": f"\n\n*[Transferring you to the {target_role} specialist...]*\n\n"}) + "\n\n"
+
+                                                self.client.agents.create_message(
+                                                    thread_id=thread_id,
+                                                    role="user",
+                                                    content=f"[System: User transferred to {target_role}. Introduce yourself and continue.]"
+                                                )
+                                                with self.client.agents.create_stream(
+                                                    thread_id=thread_id,
+                                                    assistant_id=new_agent_id,
+                                                    additional_instructions=(
+                                                        f"You ARE talking to the user. THEY ARE ALREADY LOGGED IN. "
+                                                        "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+                                                    ),
+                                                    max_completion_tokens=1000,
+                                                    truncation_strategy={"type": "last_messages", "last_messages": 10}
+                                                ) as handoff_stream:
+                                                    yield from process_stream(handoff_stream, depth=depth + 1)
+                                    except Exception as e:
+                                        print(f"Error auto-triggering handoff: {e}")
+                                    break  # Only handle first handoff
 
                 with self.client.agents.create_stream(
                     thread_id=thread_id,
@@ -425,15 +437,19 @@ class AzureAgentClient:
                     max_completion_tokens=1000,
                     truncation_strategy={"type": "last_messages", "last_messages": 10}
                 ) as initial_stream:
-                    yield from process_stream(initial_stream)
+                    yield from process_stream(initial_stream, depth=0)
+
+                # Emit done exactly once after everything finishes
+                yield json.dumps({"type": "done", "run_status": "completed"}) + "\n\n"
 
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.exception(f"Failed to execute stream for thread {thread_id}")
                 yield json.dumps({"type": "error", "content": str(e)}) + "\n\n"
-        
+
         return stream_generator()
+
 
 # Cache the client instance
 _client = None
