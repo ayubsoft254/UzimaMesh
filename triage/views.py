@@ -397,8 +397,9 @@ def api_chat_stream(request):
             # Persist full agent response and trigger summary if needed
             if sess and full_content:
                 try:
-                    ChatMessage.objects.create(session=sess, role='agent', content=full_content)
-                    msg_count = ChatMessage.objects.filter(session=sess).count()
+                    from asgiref.sync import sync_to_async
+                    await sync_to_async(ChatMessage.objects.create)(session=sess, role='agent', content=full_content)
+                    msg_count = await sync_to_async(ChatMessage.objects.filter(session=sess).count)()
                     if msg_count > 0 and msg_count % 5 == 0:
                         import threading
                         from .services import get_project_client

@@ -7,6 +7,7 @@ from django.conf import settings
 import threading
 from azure.ai.projects import AIProjectClient
 from azure.core.credentials import AzureKeyCredential, AccessToken
+from azure.core.exceptions import ServiceResponseTimeoutError
 from azure.identity import ChainedTokenCredential, EnvironmentCredential, ManagedIdentityCredential
 
 
@@ -96,7 +97,11 @@ class AzureAgentClient:
         # — no 'az login' required.
         self.client = AIProjectClient.from_connection_string(
             credential=auth_credential,
-            conn_str=conn_str
+            conn_str=conn_str,
+            # Fail fast on cold-starts / transient Azure latency.
+            # 300 s (SDK default) burns the entire App Service request timeout.
+            connection_timeout=30,
+            read_timeout=90,
         )
 
 
@@ -332,11 +337,23 @@ class AzureAgentClient:
 
         # Add message to thread
         context_message = f"[System Context: thread_id={thread_id}]\n{message}"
-        self.client.agents.create_message(
-            thread_id=thread_id,
-            role="user",
-            content=context_message
-        )
+        try:
+            self.client.agents.create_message(
+                thread_id=thread_id,
+                role="user",
+                content=context_message
+            )
+        except ServiceResponseTimeoutError as _te:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Timeout adding message to thread %s (cold-start?): %s", thread_id, _te
+            )
+            def _timeout_gen():
+                yield json.dumps({
+                    "type": "error",
+                    "content": "The AI service took too long to respond. Please wait a moment and try again."
+                }) + "\n\n"
+            return _timeout_gen()
         
         def stream_generator():
             try:
