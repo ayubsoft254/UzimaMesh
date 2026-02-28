@@ -7,7 +7,7 @@ from django.conf import settings
 import threading
 from azure.ai.projects import AIProjectClient
 from azure.core.credentials import AzureKeyCredential, AccessToken
-from azure.identity import DefaultAzureCredential
+from azure.identity import ChainedTokenCredential, EnvironmentCredential, ManagedIdentityCredential
 
 
 class ApiKeyCredential:
@@ -32,10 +32,22 @@ _token_lock = threading.Lock()
 _global_cred = None
 
 class CachedCredential:
+    """
+    Caches tokens from an explicit credential chain:
+      1. EnvironmentCredential  — works locally and in CI (AZURE_CLIENT_ID/SECRET/TENANT set)
+      2. ManagedIdentityCredential — works on App Service with System Assigned Identity
+
+    Avoids DefaultAzureCredential which tries ~13 providers including AzureCLI and
+    VisualStudioCode that spawn subprocesses / open sockets and block Uvicorn's
+    event loop, causing ServiceResponseError: Connection aborted in production.
+    """
     def get_token(self, *scopes, **kwargs):
         global _token_cache, _token_expires_at, _token_lock, _global_cred
         if _global_cred is None:
-            _global_cred = DefaultAzureCredential()
+            _global_cred = ChainedTokenCredential(
+                EnvironmentCredential(),
+                ManagedIdentityCredential(),
+            )
         now = time.time()
         if _token_cache and now < _token_expires_at - 300:
             return _token_cache
