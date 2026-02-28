@@ -26,9 +26,7 @@ The latest version of Uzima Mesh is deployed and ready for testing.
 |---|---|---|---|
 | **Administrator** | `admin@uzimamesh.com` | `uzima123` | Active |
 | **Doctor** | `smith@uzima.com` | `password123` | Active |
-| **Patient** | `jane@example.com` | `uzima123` | **Disabled** ⚠️ |
-
-> **⚠️ Notice:** Patient account login and registration flows are currently under development and do not work. However, patients can still use the public-facing AI Intake chat without logging in.
+| **Patient** | `jane@example.com` | `uzima123` | Active |
 
 ---
 
@@ -51,7 +49,7 @@ Uzima Mesh is a modern, full-stack triage and healthcare coordination platform b
 
 ### System Overview
 
-Uzima Mesh uses **all three Microsoft hero technologies** — Azure AI Foundry, Microsoft Agent Framework, and Azure MCP — wired together into a single cohesive platform.
+Uzima Mesh is built on **Microsoft Azure AI Foundry**, **Microsoft Agent Framework** (`azure-ai-projects` SDK), and **Azure MCP** (Model Context Protocol) — wired together into a single cohesive platform.
 
 ```mermaid
 flowchart TD
@@ -107,11 +105,24 @@ flowchart TD
 
 ### Hero Technology Mapping
 
-| Requirement | Technology Used | Where |
+| Hero Technology | How It's Used | Where |
 |---|---|---|
-| **Microsoft Foundry** | Azure AI Foundry agent schema (`1.0.0`) + `AIProjectClient` | `agents/*.agent.yaml`, `triage/services.py` |
-| **Microsoft Agent Framework** | `azure-ai-projects` SDK — threads, runs, streaming, tool submission | `triage/services.py` |
-| **Azure MCP** | `django-mcp` + `fastmcp` — SSE MCP server mounted on Django | `mcp_server/server.py`, agent YAML `tools.type: mcp` |
+| **Azure AI Foundry** | Hosts the AI Hub + Project; agent definitions authored with Foundry agent schema `1.0.0`; `AIProjectClient` connects via Foundry connection string | `agents/*.agent.yaml`, `triage/services.py`, `infra/ai-foundry.bicep` |
+| **Microsoft Agent Framework** | `azure-ai-projects` SDK — creates threads, runs agents, streams responses, submits tool outputs, manages multi-agent handoffs | `triage/services.py` |
+| **Azure MCP** | `django-mcp` + `fastmcp` expose an SSE MCP server on the Django app; Foundry agents connect to it via `tools.type: mcp` to call Django ORM tools | `mcp_server/server.py`, `agents/Uzima-Intake-Agent.agent.yaml` |
+
+### Azure Resources
+
+All infrastructure is defined as Bicep IaC in `/infra/` and deployed via Azure Developer CLI (`azd`).
+
+| Azure Resource | SKU / Config | Purpose |
+|---|---|---|
+| **Azure App Service** (Linux) | S1 · Python 3.11 · 2 instances | Hosts the Django application and MCP SSE endpoint |
+| **Azure App Service Plan** | Standard S1 | Compute plan for the App Service |
+| **Azure AI Foundry Hub** | `MachineLearningServices/workspaces` · Kind: `Hub` | Top-level AI workspace hub, System Assigned Identity |
+| **Azure AI Foundry Project** | `MachineLearningServices/workspaces` · Kind: `Project` | Scoped project linked to the Hub; hosts GPT-4o agents |
+| **Azure Database for PostgreSQL Flexible Server** | `Standard_B1ms` · Burstable · PostgreSQL 15 · 32 GB | Production relational database |
+| **Azure Resource Group** | `azd`-managed | Logical container for all resources |
 
 ### Multi-Agent Handoff Flow
 
