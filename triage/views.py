@@ -104,6 +104,7 @@ except ImportError:
 # Patient Intake — Conversational UI
 # ──────────────────────────────────────────────
 
+@login_required
 def patient_intake(request):
     """Render the conversational triage intake page with persistence support."""
     thread_id = None
@@ -213,9 +214,10 @@ def api_chat(request):
             patient = getattr(request.user, 'patient_profile', None)
             if patient:
                 user_data = {
-                    'first_name': patient.first_name,
-                    'last_name': patient.last_name,
-                    'email': patient.email
+                    # Read from Patient model fields first (populated at signup)
+                    'first_name': patient.first_name or request.user.first_name,
+                    'last_name': patient.last_name or request.user.last_name,
+                    'email': patient.email or request.user.email
                 }
             else:
                 # Fallback to User model
@@ -225,14 +227,10 @@ def api_chat(request):
                     'email': request.user.email
                 }
             
-            # Injecting the rolling AI summary to maintain diagnostic context 
+            # Inject the rolling AI summary to maintain diagnostic context
             # while truncating raw history messages.
             if session and session.ai_summary:
                 user_data['rolling_summary'] = session.ai_summary
-                
-            print(f"DEBUG VIEWS: Found user_data for {request.user.username}: {user_data}")
-        else:
-            print("DEBUG VIEWS: User not authenticated.")
         
         response_data = send_message(thread_id, context_msg, role=role, user_data=user_data)
         ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
@@ -344,9 +342,10 @@ def api_chat_stream(request):
         patient = getattr(request.user, 'patient_profile', None)
         if patient:
             user_data = {
-                'first_name': patient.first_name,
-                'last_name': patient.last_name,
-                'email': patient.email
+                # Read from Patient model fields first (populated at signup)
+                'first_name': patient.first_name or request.user.first_name,
+                'last_name': patient.last_name or request.user.last_name,
+                'email': patient.email or request.user.email
             }
         else:
             # Fallback to User model
@@ -355,9 +354,11 @@ def api_chat_stream(request):
                 'last_name': request.user.last_name,
                 'email': request.user.email
             }
-        print(f"DEBUG VIEWS STREAM: Found user_data for {request.user.username}: {user_data}")
-    else:
-        print("DEBUG VIEWS STREAM: User not authenticated.")
+        
+        # BUG 2 FIX: Inject the rolling AI summary in the stream path too.
+        # Without this the agent has zero diagnostic context when streaming.
+        if session and session.ai_summary:
+            user_data['rolling_summary'] = session.ai_summary
 
     # Try sending message
     try:
