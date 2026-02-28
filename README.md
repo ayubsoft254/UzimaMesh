@@ -49,31 +49,119 @@ Uzima Mesh is a modern, full-stack triage and healthcare coordination platform b
 
 ## Architecture
 
+### System Overview
+
+Uzima Mesh uses **all three Microsoft hero technologies** — Azure AI Foundry, Microsoft Agent Framework, and Azure MCP — wired together into a single cohesive platform.
+
+```mermaid
+flowchart TD
+    subgraph Client["🌐 Client (Browser)"]
+        UI["Patient Intake Chat\n(HTMX + SSE Streaming)"]
+        DC["Doctor Command Center\n(HTMX Dashboard)"]
+    end
+
+    subgraph Django["⚙️ Django 5.0 Backend (Azure App Service)"]
+        Views["triage/views.py\npatient_intake · api_chat_stream · doctor_dashboard"]
+        Services["triage/services.py\nAzureAgentClient · send_message_stream · create_thread"]
+    end
+
+    subgraph MCP["🔌 Azure MCP Server (django-mcp / fastmcp)"]
+        direction TB
+        T1["Tool: create_triage_record"]
+        T2["Tool: handoff_to_agent"]
+        T3["Tool: consult_agent"]
+        T4["Tool: get_doctor_availability"]
+    end
+
+    subgraph Foundry["☁️ Azure AI Foundry (azure-ai-projects SDK)"]
+        direction TB
+        Intake["Intake Agent\nasst_rAQZ3vO6... · GPT-4o"]
+        Guardian["Guardian Agent\n24/7 Emergency Sentinel"]
+        Analysis["Analysis Agent\nClinical Guidelines · Urgency Scoring"]
+        Scheduler["Scheduler Agent\nAppointment Coordination"]
+    end
+
+    subgraph DB["🗄️ Database (PostgreSQL / SQLite)"]
+        M1["Patient"]
+        M2["TriageSession"]
+        M3["Doctor"]
+        M4["ChatMessage"]
+    end
+
+    UI -->|"HTTP POST / SSE"| Views
+    DC -->|"HTMX Poll"| Views
+    Views --> Services
+    Services -->|"azure-ai-projects SDK\ncreate_stream · create_run"| Foundry
+
+    Intake -->|"MCP tool call over SSE"| MCP
+    Guardian -->|"MCP tool call over SSE"| MCP
+    Analysis -->|"MCP tool call over SSE"| MCP
+    Scheduler -->|"MCP tool call over SSE"| MCP
+
+    MCP -->|"Django ORM"| DB
+
+    Intake -->|"handoff_to_agent"| Guardian
+    Intake -->|"handoff_to_agent"| Analysis
+    Analysis -->|"handoff_to_agent"| Scheduler
+```
+
+### Hero Technology Mapping
+
+| Requirement | Technology Used | Where |
+|---|---|---|
+| **Microsoft Foundry** | Azure AI Foundry agent schema (`1.0.0`) + `AIProjectClient` | `agents/*.agent.yaml`, `triage/services.py` |
+| **Microsoft Agent Framework** | `azure-ai-projects` SDK — threads, runs, streaming, tool submission | `triage/services.py` |
+| **Azure MCP** | `django-mcp` + `fastmcp` — SSE MCP server mounted on Django | `mcp_server/server.py`, agent YAML `tools.type: mcp` |
+
+### Multi-Agent Handoff Flow
+
+```
+Patient Message
+      │
+      ▼
+ Intake Agent  ──── consult_agent ────▶  Analysis Agent
+      │                                       │
+      │  (urgency confirmed)                  │ (returns score + guideline)
+      │                                       │
+      └─── handoff_to_agent ────────▶  Scheduler Agent
+```
+
+1. **Intake Agent** greets the patient, collects HPI (History of Presenting Illness) one question at a time.
+2. If red-flag symptoms are detected, it calls `consult_agent` → **Guardian Agent** for immediate escalation.
+3. Once symptoms are gathered, it calls `consult_agent` → **Analysis Agent** to cross-reference Kenya National Clinical Guidelines and get a standardized urgency score.
+4. Finally it calls `create_triage_record` (MCP) to persist the session, then `handoff_to_agent` → **Scheduler Agent** to book follow-up.
+
+All agent-to-agent communication happens on a **shared thread** managed by Azure AI Foundry Threads, with tool results submitted back via the Agent Framework.
+
+### Project File Structure
+
 ```text
 UzimaMesh/
 ├── uzima_mesh/            # Django project settings & root URL conf
 ├── triage/                # Core application
 │   ├── models.py          # Patient, Doctor, TriageSession, ChatMessage
 │   ├── views.py           # Dashboard, intake UI, doctor command center
-│   ├── services.py        # Azure AI Projects SDK connection logic
+│   ├── services.py        # Azure AI Projects SDK — AzureAgentClient
 │   └── serializers.py     # DRF serializers
 │
-├── mcp_server/            # Model Context Protocol server
-│   └── server.py          # FastMCP tools injected with Django context
+├── mcp_server/            # Azure MCP Server
+│   └── server.py          # FastMCP tools exposed over SSE to Foundry agents
+│
+├── agents/                # Microsoft Foundry agent definitions
+│   └── Uzima-Intake-Agent.agent.yaml
 │
 ├── templates/             # Django templates
-│   ├── base.html          # Shared layout (nav, auth, static)
-│   ├── account/           # Allauth authentication pages
-│   └── triage/            # Intake form, dashboards, HTMX partials
-│       ├── patient_intake.html
+│   ├── base.html
+│   └── triage/
+│       ├── patient_intake.html   # Streaming SSE chat UI
 │       ├── doctor_dashboard.html
 │       └── dashboard.html
 │
-├── static/                # Static assets (CSS, JS, images)
-├── requirements.txt       # Python dependencies (strictly pinned)
-├── entrypoint.sh          # Production deployment script
-├── .env.example           # Environment variable template
-└── manage.py              # Django CLI
+├── static/                # Static assets (CSS, JS)
+├── infra/                 # Azure Bicep IaC (App Service, PostgreSQL)
+├── requirements.txt
+├── startup.sh             # Production startup script
+└── manage.py
 ```
 
 ---
