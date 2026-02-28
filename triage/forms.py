@@ -62,6 +62,9 @@ class CustomSignupForm(SignupForm):
 
         Patient.objects.create(
             user=user,
+            first_name=self.cleaned_data["first_name"],
+            last_name=self.cleaned_data["last_name"],
+            email=user.email,
             date_of_birth=self.cleaned_data["date_of_birth"],
             gender=self.cleaned_data["gender"],
         )

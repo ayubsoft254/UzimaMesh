@@ -141,23 +141,29 @@ class Command(BaseCommand):
                 }
             )
 
-            session = TriageSession.objects.create(
+            session, session_created = TriageSession.objects.get_or_create(
                 patient=patient,
-                doctor=doctor if data['status'] == 'IN_PROGRESS' else None,
                 symptoms=data['symptoms'],
-                urgency_score=data['urgency_score'],
-                status=data['status'],
-                ai_summary=data['ai_summary'],
-                recommended_action=data['recommended_action'],
-                agent_logs=(
-                    f"[Intake Agent] Session created via conversational intake\n"
-                    f"[Intake Agent] Patient: {patient}\n"
-                    f"[Intake Agent] Urgency score computed: {data['urgency_score']}\n"
-                    f"[MCP:Azure SQL] Verified patient history — {data['medical_history']}\n"
-                    f"[MCP:Azure SQL] Cross-referenced prescriptions\n"
-                    f"[Intake Agent] Recommended: {data['recommended_action']}"
-                ),
+                defaults={
+                    'doctor': doctor if data['status'] == 'IN_PROGRESS' else None,
+                    'urgency_score': data['urgency_score'],
+                    'status': data['status'],
+                    'ai_summary': data['ai_summary'],
+                    'recommended_action': data['recommended_action'],
+                    'agent_logs': (
+                        f"[Intake Agent] Session created via conversational intake\n"
+                        f"[Intake Agent] Patient: {patient}\n"
+                        f"[Intake Agent] Urgency score computed: {data['urgency_score']}\n"
+                        f"[MCP:Azure SQL] Verified patient history — {data['medical_history']}\n"
+                        f"[MCP:Azure SQL] Cross-referenced prescriptions\n"
+                        f"[Intake Agent] Recommended: {data['recommended_action']}"
+                    ),
+                }
             )
+
+            if not session_created:
+                continue  # Skip chat messages for existing sessions
+
 
             # Create mock chat messages
             ChatMessage.objects.create(
