@@ -169,19 +169,26 @@
     const chatInput = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
     const typingIndicator = document.getElementById('typing-indicator');
-    const urgencyCard = document.getElementById('urgency-card');
-    const inputBar = document.getElementById('input-bar');
 
     // Thread ID provided by Django context
     const threadId = "{{ thread_id|default_if_none:'' }}";
+
+    /**
+     * Render text with minimal Markdown: bold, italic, newlines.
+     * Also HTML-escapes raw content to prevent XSS.
+     */
+    function renderText(text) {
+        return text
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/\n/g, '<br>');
+    }
 
     function addMessage(content, role) {
         const isAgent = role === 'agent';
         const wrapper = document.createElement('div');
         wrapper.className = `flex ${isAgent ? 'justify-start msg-agent' : 'justify-end msg-patient'}`;
-
-        // Format content, preserving newlines
-        const formattedContent = content.replace(/\n/g, '<br>');
 
         if (isAgent) {
             wrapper.innerHTML = `
@@ -194,7 +201,7 @@
                     <div>
                         <p class="text-[9px] text-mesh-500/60 font-bold uppercase tracking-widest mb-1">AI Assistant</p>
                         <div class="glass px-5 py-3.5 rounded-2xl rounded-bl-md">
-                            <p class="text-sm text-neutral-200 leading-relaxed">${formattedContent}</p>
+                            <p class="text-sm text-neutral-200 leading-relaxed">${renderText(content)}</p>
                         </div>
                     </div>
                 </div>`;
@@ -203,7 +210,7 @@
                 <div class="max-w-[85%]">
                     <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest mb-1 text-right">You</p>
                     <div class="bg-mesh-500/20 border border-mesh-500/20 px-5 py-3.5 rounded-2xl rounded-br-md">
-                        <p class="text-sm text-white leading-relaxed">${formattedContent}</p>
+                        <p class="text-sm text-white leading-relaxed">${renderText(content)}</p>
                     </div>
                 </div>`;
         }
@@ -226,13 +233,40 @@
         chatInput.focus();
     }
 
-    async function sendMessage(textOverride = null) {
-        const text = textOverride || chatInput.value.trim();
+    /**
+     * Creates a streaming agent message bubble and returns the content element.
+     */
+    function createStreamingBubble() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'flex justify-start msg-agent';
+        wrapper.innerHTML = `
+            <div class="flex items-start space-x-3 max-w-[85%]">
+                <div class="w-8 h-8 rounded-full bg-mesh-500/20 border border-mesh-500/30 flex items-center justify-center flex-shrink-0 mt-1">
+                    <svg class="w-4 h-4 text-mesh-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 002 2z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-[9px] text-mesh-500/60 font-bold uppercase tracking-widest mb-1">AI Assistant</p>
+                    <div class="glass px-5 py-3.5 rounded-2xl rounded-bl-md">
+                        <p class="text-sm text-neutral-200 leading-relaxed message-content"></p>
+                    </div>
+                </div>
+            </div>`;
+        chatMessages.appendChild(wrapper);
+        return wrapper.querySelector('.message-content');
+    }
+
+    /**
+     * Core streaming fetch. Sends message to /api/chat/stream/ and streams the response.
+     * @param {string} text - The message to send
+     * @param {boolean} showUserBubble - Whether to show a "You:" bubble (false for hidden init)
+     */
+    async function streamMessage(text, showUserBubble = true) {
         if (!text) return;
 
-        if (!textOverride) {
+        if (showUserBubble) {
             addMessage(text, 'patient');
-            chatInput.value = '';
         }
 
         showTyping();
@@ -245,10 +279,7 @@
                     'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
                         document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
                 },
-                body: JSON.stringify({
-                    message: text,
-                    thread_id: threadId
-                })
+                body: JSON.stringify({ message: text, thread_id: threadId })
             });
 
             hideTyping();
@@ -260,60 +291,58 @@
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
-
-            const wrapper = document.createElement('div');
-            wrapper.className = 'flex justify-start msg-agent';
-            wrapper.innerHTML = `
-                <div class="flex items-start space-x-3 max-w-[85%]">
-                    <div class="w-8 h-8 rounded-full bg-mesh-500/20 border border-mesh-500/30 flex items-center justify-center flex-shrink-0 mt-1">
-                        <svg class="w-4 h-4 text-mesh-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                        </svg>
-                    </div>
-                    <div>
-                        <p class="text-[9px] text-mesh-500/60 font-bold uppercase tracking-widest mb-1">AI Assistant</p>
-                        <div class="glass px-5 py-3.5 rounded-2xl rounded-bl-md">
-                            <p class="text-sm text-neutral-200 leading-relaxed message-content"></p>
-                        </div>
-                    </div>
-                </div>`;
-
-            chatMessages.appendChild(wrapper);
-            const contentEl = wrapper.querySelector('.message-content');
+            const contentEl = createStreamingBubble();
             let fullText = "";
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+            // BUG 3 FIX: Use a buffer to accumulate TCP chunks.
+            // JSON blocks are terminated by \n\n so we only parse complete ones.
+            let buffer = "";
 
-                const chunkStr = decoder.decode(value, { stream: true });
-                const lines = chunkStr.split('\n\n'); // Double newline indicates SSE block
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                        const data = JSON.parse(line);
-                        if (data.type === 'chunk') {
-                            fullText += data.content;
-                            contentEl.innerHTML = fullText.replace(/\n/g, '<br>');
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        } else if (data.type === 'error') {
-                            fullText += "<br><span class='text-red-400'>[System: " + data.content + "]</span>";
-                            contentEl.innerHTML = fullText.replace(/\n/g, '<br>');
-                        } else if (data.type === 'done') {
-                            // Run completed
+                    buffer += decoder.decode(value, { stream: true });
+
+                    let boundary;
+                    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                        const block = buffer.slice(0, boundary).trim();
+                        buffer = buffer.slice(boundary + 2);
+                        if (!block) continue;
+
+                        try {
+                            const data = JSON.parse(block);
+                            if (data.type === 'chunk') {
+                                fullText += data.content;
+                                contentEl.innerHTML = renderText(fullText);
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            } else if (data.type === 'error') {
+                                contentEl.innerHTML += `<br><span class='text-red-400'>[Error: ${data.content}]</span>`;
+                            }
+                            // 'done' type: stream complete, nothing extra to do
+                        } catch (e) {
+                            // Malformed block — skip silently
                         }
-                    } catch (e) {
-                        // ignore malformed chunks until fully received
                     }
                 }
+            } finally {
+                // BUG 5 FIX: Always re-enable input — even if stream errored mid-way.
+                hideTyping();
             }
 
         } catch (error) {
             hideTyping();
-            addMessage("I'm sorry, my network seems to be having trouble reaching the triage systems.", 'agent');
+            addMessage("I'm sorry, my network is having trouble reaching the triage systems.", 'agent');
             console.error('Chat error:', error);
         }
+    }
+
+    function sendMessage() {
+        const text = chatInput.value.trim();
+        if (!text || sendBtn.disabled) return;
+        chatInput.value = '';
+        streamMessage(text, true);
     }
 
     // Enter key handler
@@ -324,29 +353,28 @@
         }
     });
 
-    // Start conversation automatically when the page loads
+    // ─── Startup Logic ───────────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', async () => {
-        // 1. Fetch history from the API
+        // 1. Try to load existing chat history for this thread
         try {
-            const response = await fetch(`/api/chat/history/${threadId}/`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.messages && data.messages.length > 0) {
-                    // Render historical messages
-                    data.messages.forEach(msg => {
-                        // Backend uses 'patient'/'agent', frontend function expects same
-                        addMessage(msg.content, msg.role);
-                    });
-                } else {
-                    // Only send a hidden initialization message if no history exists
-                    sendMessage("Hello! I need to start a triage intake.");
+            if (threadId) {
+                const response = await fetch(`/api/chat/history/${threadId}/`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.messages && data.messages.length > 0) {
+                        data.messages.forEach(msg => addMessage(msg.content, msg.role));
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                        return; // History loaded — don't send init greeting
+                    }
                 }
             }
         } catch (error) {
             console.error('Failed to load history:', error);
-            // Fallback: send init message anyway
-            sendMessage("Hello! I need to start a triage intake.");
         }
+
+        // 2. BUG 4 FIX: Send init silently — only the agent reply is shown.
+        // The patient never sees a "You: Hello!" bubble they didn't type.
+        streamMessage("Hello!", false);
     });
 </script>
 {% endblock %}

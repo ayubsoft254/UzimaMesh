@@ -104,6 +104,7 @@ except ImportError:
 # Patient Intake — Conversational UI
 # ──────────────────────────────────────────────
 
+@login_required
 def patient_intake(request):
     """Render the conversational triage intake page with persistence support."""
     thread_id = None
@@ -213,9 +214,10 @@ def api_chat(request):
             patient = getattr(request.user, 'patient_profile', None)
             if patient:
                 user_data = {
-                    'first_name': patient.first_name,
-                    'last_name': patient.last_name,
-                    'email': patient.email
+                    # Read from Patient model fields first (populated at signup)
+                    'first_name': patient.first_name or request.user.first_name,
+                    'last_name': patient.last_name or request.user.last_name,
+                    'email': patient.email or request.user.email
                 }
             else:
                 # Fallback to User model
@@ -225,14 +227,10 @@ def api_chat(request):
                     'email': request.user.email
                 }
             
-            # Injecting the rolling AI summary to maintain diagnostic context 
+            # Inject the rolling AI summary to maintain diagnostic context
             # while truncating raw history messages.
             if session and session.ai_summary:
                 user_data['rolling_summary'] = session.ai_summary
-                
-            print(f"DEBUG VIEWS: Found user_data for {request.user.username}: {user_data}")
-        else:
-            print("DEBUG VIEWS: User not authenticated.")
         
         response_data = send_message(thread_id, context_msg, role=role, user_data=user_data)
         ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
@@ -316,6 +314,10 @@ def api_chat(request):
 @require_POST
 def api_chat_stream(request):
     """Receive a chat message and return a StreamingHttpResponse with SSE chunked data."""
+    import asyncio
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -335,99 +337,116 @@ def api_chat_stream(request):
         session_id = session.id
 
     context_msg = f"[Context: session_id={session_id}]\n{user_message}" if session_id else user_message
-    
+
     from django.http import StreamingHttpResponse
-    
-    # Strategy: Personalization - Fetch patient data
+
+    # Personalization — fetch patient data
     user_data = None
     if request.user.is_authenticated:
         patient = getattr(request.user, 'patient_profile', None)
         if patient:
             user_data = {
-                'first_name': patient.first_name,
-                'last_name': patient.last_name,
-                'email': patient.email
+                'first_name': patient.first_name or request.user.first_name,
+                'last_name': patient.last_name or request.user.last_name,
+                'email': patient.email or request.user.email
             }
         else:
-            # Fallback to User model
             user_data = {
                 'first_name': request.user.first_name,
                 'last_name': request.user.last_name,
                 'email': request.user.email
             }
-        print(f"DEBUG VIEWS STREAM: Found user_data for {request.user.username}: {user_data}")
-    else:
-        print("DEBUG VIEWS STREAM: User not authenticated.")
+        if session and session.ai_summary:
+            user_data['rolling_summary'] = session.ai_summary
 
-    # Try sending message
+    def _make_async_stream(sync_gen, sess):
+        """Wrap a synchronous generator in an async generator.
+
+        Uvicorn (ASGI) requires StreamingHttpResponse to receive an async
+        iterable. Feeding it a sync generator causes the
+        'must consume synchronous iterators' warning and can result in
+        premature stream termination. We run each next() call in a thread
+        pool via asyncio.to_thread so the event loop stays unblocked.
+        """
+        async def _async_gen():
+            full_content = ""
+            loop = asyncio.get_event_loop()
+            it = iter(sync_gen)
+            _SENTINEL = object()  # unique marker for exhausted iterator
+            while True:
+                try:
+                    # Use next(it, _SENTINEL) so exhaustion returns the sentinel
+                    # instead of raising StopIteration, which asyncio cannot
+                    # propagate through a Future (TypeError in Python 3.7+).
+                    chunk = await loop.run_in_executor(None, next, it, _SENTINEL)
+                except Exception as exc:
+                    logger.exception("Error reading stream chunk")
+                    yield json.dumps({"type": "error", "content": str(exc)}) + "\n\n"
+                    break
+                if chunk is _SENTINEL:
+                    break  # iterator exhausted cleanly
+                # Accumulate agent text for DB logging
+                try:
+                    parsed = json.loads(chunk.strip())
+                    if parsed.get('type') == 'chunk':
+                        full_content += parsed.get('content', '')
+                except Exception:
+                    pass
+                yield chunk
+
+            # Persist full agent response and trigger summary if needed
+            if sess and full_content:
+                try:
+                    ChatMessage.objects.create(session=sess, role='agent', content=full_content)
+                    msg_count = ChatMessage.objects.filter(session=sess).count()
+                    if msg_count > 0 and msg_count % 5 == 0:
+                        import threading
+                        from .services import get_project_client
+                        def update_summary(session_id, tid):
+                            try:
+                                s = TriageSession.objects.get(id=session_id)
+                                client = get_project_client()
+                                summary_prompt = "Please provide a concise medical summary of the patient's symptoms and state so far, ignoring pleasantries."
+                                resp = client.send_message(tid, summary_prompt, role="analysis")
+                                if resp and resp.get("content"):
+                                    s.ai_summary = resp["content"]
+                                    s.save()
+                            except Exception:
+                                logging.getLogger(__name__).exception("Failed to auto-update rolling summary in stream")
+                        threading.Thread(target=update_summary, args=(sess.id, thread_id), daemon=True).start()
+                except Exception:
+                    logger.exception("Failed to persist agent stream response")
+
+        return _async_gen()
+
+    # Log user message immediately
     try:
-        # Log user message immediately
         if session:
             ChatMessage.objects.create(session=session, role='patient', content=user_message)
 
         generator = send_message_stream(thread_id, context_msg, role=role, user_data=user_data)
-        
-        # Wrap generator to log the final agent response
-        def logging_generator(gen, sess):
-            full_content = ""
-            for chunk in gen:
-                try:
-                    data = json.loads(chunk.strip())
-                    if data.get('type') == 'chunk':
-                        full_content += data.get('content', '')
-                except:
-                    pass
-                yield chunk
-            
-            
-            if sess and full_content:
-                ChatMessage.objects.create(session=sess, role='agent', content=full_content)
-                
-                # Trigger automatic rolling summary if message count is a multiple of 5
-                msg_count = ChatMessage.objects.filter(session=sess).count()
-                if msg_count > 0 and msg_count % 5 == 0:
-                    import threading
-                    from .services import get_project_client
-                    def update_summary(session_id, tid):
-                        try:
-                            s = TriageSession.objects.get(id=session_id)
-                            client = get_project_client()
-                            summary_prompt = "Please provide a concise medical summary of the patient's symptoms and state so far, ignoring pleasantries."
-                            resp = client.send_message(tid, summary_prompt, role="analysis")
-                            if resp and resp.get("content"):
-                                s.ai_summary = resp["content"]
-                                s.save()
-                        except Exception as e:
-                            import logging
-                            logging.getLogger(__name__).exception("Failed to auto-update rolling summary in stream")
-                            
-                    threading.Thread(target=update_summary, args=(sess.id, thread_id)).start()
+        return StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
 
-        return StreamingHttpResponse(logging_generator(generator, session), content_type='text/event-stream')
     except Exception as e:
         error_str = str(e)
-        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower() or "active" in error_str.lower():
+        stale_thread = any(k in error_str.lower() for k in ["no thread found", "not found", "(none)", "active"])
+        if stale_thread:
             try:
-                print("Stale or locked thread detected. Creating a new thread session...")
+                logger.warning("Stale/locked thread detected. Creating a new thread.")
                 new_thread_id = create_thread()
                 request.session['triage_thread_id'] = new_thread_id
-                
                 generator = send_message_stream(new_thread_id, context_msg, role="intake", user_data=user_data)
-                return StreamingHttpResponse(generator, content_type='text/event-stream')
+                return StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
             except Exception as retry_e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.exception("Failed to retry sending message stream to Azure Agent")
-                def err_gen():
+                async def _err():
                     yield json.dumps({"type": "error", "content": f"Retry failed: {str(retry_e)}"}) + "\n\n"
-                return StreamingHttpResponse(err_gen(), content_type='text/event-stream')
+                return StreamingHttpResponse(_err(), content_type='text/event-stream')
         else:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.exception("Error occurred connecting stream to the AI Agent")
-            def err_gen():
+            async def _err():
                 yield json.dumps({"type": "error", "content": f"Error: {error_str}"}) + "\n\n"
-            return StreamingHttpResponse(err_gen(), content_type='text/event-stream')
+            return StreamingHttpResponse(_err(), content_type='text/event-stream')
 
 
 # ──────────────────────────────────────────────

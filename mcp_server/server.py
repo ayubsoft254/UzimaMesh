@@ -40,7 +40,39 @@ def create_triage_record(
     phone: str = "",
     thread_id: str = None
 ):
-    """Create a new patient record and a corresponding triage session."""
+    """Create or update a triage record for the patient. 
+    If a session with this thread_id already exists, update it with the collected symptoms.
+    Otherwise create a new patient record and triage session."""
+    
+    # --- Priority 1: Update existing session by thread_id (logged-in user flow) ---
+    if thread_id:
+        existing_session = TriageSession.objects.filter(thread_id=thread_id).order_by('-created_at').first()
+        if existing_session:
+            existing_session.symptoms = symptoms
+            existing_session.urgency_score = urgency_score
+            existing_session.status = 'PENDING'
+            existing_session.agent_logs += f"\n[Agent] Triage record completed. Urgency: {urgency_score}/5"
+            existing_session.save()
+            
+            # Also update patient info if fields are empty
+            patient = existing_session.patient
+            if not patient.first_name:
+                patient.first_name = first_name
+            if not patient.last_name:
+                patient.last_name = last_name
+            if not patient.phone and phone:
+                patient.phone = phone
+            patient.save()
+            
+            return {
+                "status": "success",
+                "session_id": existing_session.id,
+                "patient": str(patient),
+                "urgency": urgency_score,
+                "action": "updated"
+            }
+    
+    # --- Priority 2: Find patient by email or create new ---
     patient, created = Patient.objects.get_or_create(
         email=email,
         defaults={
@@ -55,15 +87,18 @@ def create_triage_record(
         symptoms=symptoms,
         urgency_score=urgency_score,
         status='PENDING',
-        thread_id=thread_id
+        thread_id=thread_id,
+        agent_logs=f"[Agent] Triage record created. Urgency: {urgency_score}/5"
     )
     
     return {
         "status": "success",
         "session_id": session.id,
         "patient": str(patient),
-        "urgency": urgency_score
+        "urgency": urgency_score,
+        "action": "created"
     }
+
 
 @mcp_app.tool()
 def handoff_to_agent(session_id: int, target_role: str):
