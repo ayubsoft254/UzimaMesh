@@ -372,15 +372,19 @@ def api_chat_stream(request):
             full_content = ""
             loop = asyncio.get_event_loop()
             it = iter(sync_gen)
+            _SENTINEL = object()  # unique marker for exhausted iterator
             while True:
                 try:
-                    chunk = await loop.run_in_executor(None, next, it)
-                except StopIteration:
-                    break
+                    # Use next(it, _SENTINEL) so exhaustion returns the sentinel
+                    # instead of raising StopIteration, which asyncio cannot
+                    # propagate through a Future (TypeError in Python 3.7+).
+                    chunk = await loop.run_in_executor(None, next, it, _SENTINEL)
                 except Exception as exc:
                     logger.exception("Error reading stream chunk")
                     yield json.dumps({"type": "error", "content": str(exc)}) + "\n\n"
                     break
+                if chunk is _SENTINEL:
+                    break  # iterator exhausted cleanly
                 # Accumulate agent text for DB logging
                 try:
                     parsed = json.loads(chunk.strip())
