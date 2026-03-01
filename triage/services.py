@@ -8,57 +8,7 @@ import threading
 from azure.ai.projects import AIProjectClient
 from azure.core.credentials import AzureKeyCredential, AccessToken
 from azure.core.exceptions import ServiceResponseTimeoutError
-from azure.identity import ChainedTokenCredential, EnvironmentCredential, ManagedIdentityCredential
-
-
-class ApiKeyCredential:
-    """
-    TokenCredential implementation that uses a static API key as the bearer token.
-    The Azure AI Projects SDK internally calls get_token() on all credentials —
-    this wrapper satisfies that contract without requiring az login.
-    """
-    def __init__(self, api_key: str):
-        self._api_key = api_key
-        # Set expiry far in the future (year 2099) so it never triggers a refresh
-        self._token = AccessToken(token=api_key, expires_on=4102444800)
-
-    def get_token(self, *scopes, **kwargs) -> AccessToken:
-        return self._token
-
-
-# Legacy cached DefaultAzureCredential (used as fallback only)
-_token_cache = None
-_token_expires_at = 0
-_token_lock = threading.Lock()
-_global_cred = None
-
-class CachedCredential:
-    """
-    Caches tokens from an explicit credential chain:
-      1. EnvironmentCredential  — works locally and in CI (AZURE_CLIENT_ID/SECRET/TENANT set)
-      2. ManagedIdentityCredential — works on App Service with System Assigned Identity
-
-    Avoids DefaultAzureCredential which tries ~13 providers including AzureCLI and
-    VisualStudioCode that spawn subprocesses / open sockets and block Uvicorn's
-    event loop, causing ServiceResponseError: Connection aborted in production.
-    """
-    def get_token(self, *scopes, **kwargs):
-        global _token_cache, _token_expires_at, _token_lock, _global_cred
-        if _global_cred is None:
-            _global_cred = ChainedTokenCredential(
-                EnvironmentCredential(),
-                ManagedIdentityCredential(),
-            )
-        now = time.time()
-        if _token_cache and now < _token_expires_at - 300:
-            return _token_cache
-        with _token_lock:
-            now = time.time()
-            if not _token_cache or now > _token_expires_at - 300:
-                _token_cache = _global_cred.get_token(*scopes, **kwargs)
-                _token_expires_at = _token_cache.expires_on
-            return _token_cache
-
+from azure.identity import DefaultAzureCredential
 
 
 class AzureAgentClient:
@@ -69,7 +19,6 @@ class AzureAgentClient:
         sub_id = os.getenv("AZURE_SUBSCRIPTION_ID")
         rg_name = os.getenv("AZURE_RESOURCE_GROUP", "rg-uzima-mesh")
         project_name = os.getenv("AZURE_AI_PROJECT_NAME", "ai-uzima-mesh-project")
-        api_key = os.getenv("AZURE_AI_API_KEY")
 
         # Agent Mapping
         self.agents = {
@@ -91,14 +40,8 @@ class AzureAgentClient:
         host = endpoint.replace("https://", "").rstrip("/")
         conn_str = f"{host};{sub_id};{rg_name};{project_name}"
 
-        # Use CachedCredential which wraps DefaultAzureCredential.
-        # With AZURE_CLIENT_ID + AZURE_CLIENT_SECRET set in .env, 
-        # EnvironmentCredential will automatically authenticate via service principal
-        # — no 'az login' required.
-        auth_credential = ApiKeyCredential(api_key) if api_key else CachedCredential()
-
         self.client = AIProjectClient.from_connection_string(
-            credential=auth_credential,
+            credential=DefaultAzureCredential(),
             conn_str=conn_str,
             # Fail fast on cold-starts / transient Azure latency.
             # 300 s (SDK default) burns the entire App Service request timeout.
