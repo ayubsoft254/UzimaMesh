@@ -321,9 +321,16 @@ class AzureAgentClient:
                             run_id = getattr(event_data, "id", None)
                         elif event_type == "thread.message.delta":
                             for block in event_data.delta.content:
-                                if getattr(block, 'type', None) == 'text' or (isinstance(block, dict) and block.get('type') == 'text'):
-                                    text_val = block.text.value if not isinstance(block, dict) else block["text"]["value"]
+                                if hasattr(block, 'text') and hasattr(block.text, 'value'):
+                                    text_val = block.text.value
                                     yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+                                elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
+                                    text_val = block.text.value
+                                    yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+                                elif isinstance(block, dict) and block.get('type') == 'text':
+                                    text_val = block.get('text', {}).get('value', '')
+                                    if text_val:
+                                        yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
                         elif event_type == "thread.run.requires_action":
                             if hasattr(event_data, 'id'):
                                 run_id = event_data.id
