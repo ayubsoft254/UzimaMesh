@@ -1,33 +1,48 @@
 import json
-import requests
+import logging
 import time
 import os
-from typing import Dict, Any
-from django.conf import settings
 import threading
+import concurrent.futures
+from typing import Dict, Any, Generator
+
+from django.conf import settings
+from django.core.exceptions import SuspiciousOperation
+
 from azure.ai.projects import AIProjectClient
-from azure.core.credentials import AzureKeyCredential, AccessToken
 from azure.core.exceptions import ServiceResponseTimeoutError
 from azure.identity import DefaultAzureCredential
 
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Thread-safe singleton helpers
+# ---------------------------------------------------------------------------
+_client: "AzureAgentClient | None" = None
+_client_lock = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Azure Agent Client
+# ---------------------------------------------------------------------------
 
 class AzureAgentClient:
     """Call Azure AI agents using the official SDK, supporting multiple roles."""
-    
-    def __init__(self):
+
+    def __init__(self) -> None:
         endpoint = settings.AZURE_AI_ENDPOINT
         sub_id = os.getenv("AZURE_SUBSCRIPTION_ID")
         rg_name = os.getenv("AZURE_RESOURCE_GROUP", "rg-uzima-mesh")
         project_name = os.getenv("AZURE_AI_PROJECT_NAME", "ai-uzima-mesh-project")
 
-        # Agent Mapping
-        self.agents = {
-            "intake": os.getenv("AZURE_AI_INTAKE_AGENT_ID"),
-            "guardian": os.getenv("AZURE_AI_GUARDIAN_AGENT_ID"),
+        # Agent ID mapping
+        self.agents: Dict[str, str | None] = {
+            "intake":       os.getenv("AZURE_AI_INTAKE_AGENT_ID"),
+            "guardian":     os.getenv("AZURE_AI_GUARDIAN_AGENT_ID"),
             "orchestrator": os.getenv("AZURE_AI_ORCHESTRATOR_AGENT_ID"),
-            "analysis": os.getenv("AZURE_AI_ANALYSIS_AGENT_ID"),
-            "scheduler": os.getenv("AZURE_AI_SCHEDULER_AGENT_ID"),
-            "default": os.getenv("AZURE_AI_AGENT_ID")
+            "analysis":     os.getenv("AZURE_AI_ANALYSIS_AGENT_ID"),
+            "scheduler":    os.getenv("AZURE_AI_SCHEDULER_AGENT_ID"),
+            "default":      os.getenv("AZURE_AI_AGENT_ID"),
         }
 
         if not all([endpoint, self.agents["intake"]]):
@@ -36,6 +51,8 @@ class AzureAgentClient:
                 "Check AZURE_AI_ENDPOINT and Agent IDs in .env"
             )
 
+
+
         # Build connection string for AIProjectClient
         host = endpoint.replace("https://", "").rstrip("/")
         conn_str = f"{host};{sub_id};{rg_name};{project_name}"
@@ -43,274 +60,317 @@ class AzureAgentClient:
         self.client = AIProjectClient.from_connection_string(
             credential=DefaultAzureCredential(),
             conn_str=conn_str,
-            # Fail fast on cold-starts / transient Azure latency.
-            # 300 s (SDK default) burns the entire App Service request timeout.
             connection_timeout=30,
             read_timeout=90,
         )
 
-
-
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def create_thread(self) -> str:
-        """Create a new agent thread."""
+        """Create a new agent thread and return its ID."""
         thread = self.client.agents.create_thread()
         return thread.id
-    
-    def get_agent_id(self, role: str = "intake") -> str:
-        """Get agent ID by role."""
+
+    def get_agent_id(self, role: str = "intake") -> str | None:
+        """Return the agent ID for *role*, falling back to 'default'."""
         return self.agents.get(role) or self.agents.get("default")
 
-    def send_message(self, thread_id: str, message: str, role: str = "intake", user_data: dict = None) -> Dict[str, Any]:
-        """Send message to a specific agent and get response."""
-        agent_id = self.get_agent_id(role)
-        
-        # Add message to thread with system context for thread ID
-        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
-        
-        # Prepare personalization instructions if user_data is provided
-        additional_instructions = None
+    # ------------------------------------------------------------------
+    # Build per-request context helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_additional_instructions(role: str, user_data: dict | None) -> str | None:
+        if not user_data:
+            return None
+
+        name = (
+            f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip()
+            or "Guest"
+        )
+        email = user_data.get("email", "unknown")
+        first_name = (user_data.get("first_name") or name.split()[0]) or "there"
+
+        if role == "intake":
+            instructions = (
+                f"You ARE talking to {name} (Email: {email}). "
+                "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
+            )
+        else:
+            instructions = (
+                f"You ARE talking to {name} (Email: {email}). "
+                "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
+                "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+            )
+
+        rolling_summary = user_data.get("rolling_summary")
+        if rolling_summary:
+            instructions += (
+                f"\n\nCRITICAL CONTEXT (PREVIOUS SUMMARY):\n{rolling_summary}\n"
+                "Use this summary to understand the patient's history so far, "
+                "as recent raw messages may be truncated."
+            )
+
+        return instructions
+
+    @staticmethod
+    def _build_context_message(thread_id: str, message: str, user_data: dict | None) -> str:
+        """Inject identity and thread context into the user message (single construction)."""
         if user_data:
-            name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or "Guest"
-            email = user_data.get('email', 'unknown')
-            first_name = user_data.get('first_name') or name.split()[0] or "there"
-            
-            # Additional run instructions
-            if role == "intake":
-                additional_instructions = (
-                    f"You ARE talking to {name} (Email: {email}). "
-                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                    f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
-                )
-            else:
-                additional_instructions = (
-                    f"You ARE talking to {name} (Email: {email}). "
-                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                    "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
-                )
-            # Inject context into message for absolute certainty
-            if user_data.get('rolling_summary'):
-                additional_instructions += (
-                    f"\n\nCRITICAL CONTEXT (PREVIOUS SUMMARY): \n{user_data['rolling_summary']}\n"
-                    "Use this summary to understand the patient's history so far, as recent raw messages may be truncated."
-                )
-            
+            name = (
+                f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip()
+                or "Guest"
+            )
+            email = user_data.get("email", "unknown")
             message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
 
-        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
+        return f"[System Context: thread_id={thread_id}]\n{message}"
+
+    # ------------------------------------------------------------------
+    # Tool execution (shared between streaming and non-streaming paths)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _execute_tool(tool_call) -> dict:
+        from mcp_server.server import (  # local import to avoid circular deps
+            create_triage_record,
+            handoff_to_agent,
+            consult_agent,
+            get_doctor_availability,
+        )
+
+        func_name = tool_call.function.name
+        try:
+            args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError:
+            args = {}
+
+        try:
+            if func_name == "create_triage_record":
+                output = create_triage_record(**args)
+            elif func_name == "handoff_to_agent":
+                output = handoff_to_agent(**args)
+            elif func_name == "consult_agent":
+                output = consult_agent(**args)
+            elif func_name == "get_doctor_availability":
+                output = get_doctor_availability(**args)
+            else:
+                output = {"error": f"Unknown tool: {func_name}"}
+        except Exception as exc:
+            output = {"error": str(exc)}
+
+        return {"tool_call_id": tool_call.id, "output": json.dumps(output)}
+
+    def _run_tools_parallel(self, tool_calls) -> list:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(self._execute_tool, tc) for tc in tool_calls]
+            return [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    # ------------------------------------------------------------------
+    # Non-streaming send
+    # ------------------------------------------------------------------
+
+    def send_message(
+        self,
+        thread_id: str,
+        message: str,
+        role: str = "intake",
+        user_data: dict | None = None,
+    ) -> Dict[str, Any]:
+        """Send a message to a specific agent and return its response."""
+        agent_id = self.get_agent_id(role)
+        additional_instructions = self._build_additional_instructions(role, user_data)
+        context_message = self._build_context_message(thread_id, message, user_data)
 
         self.client.agents.create_message(
             thread_id=thread_id,
             role="user",
-            content=context_message
+            content=context_message,
         )
-        
-        # Create run manually and poll to handle tool calls
+
         run = self.client.agents.create_run(
             thread_id=thread_id,
             assistant_id=agent_id,
             additional_instructions=additional_instructions,
             max_completion_tokens=1000,
-            truncation_strategy={"type": "last_messages", "last_messages": 10}
+            truncation_strategy={"type": "last_messages", "last_messages": 10},
         )
-        
-        import time
+
         start_time = time.time()
-        
+        POLL_TIMEOUT = 60  # seconds
+
         while True:
-            if run.status in ["queued", "in_progress"]:
-                if time.time() - start_time > 60:
-                    print(f"Cancelling stalled run after 60 seconds. Run ID: {run.id}, Status: {run.status}")
+            if run.status in ("queued", "in_progress"):
+                if time.time() - start_time > POLL_TIMEOUT:
+                    logger.warning(
+                        "Cancelling stalled run after %ds. run_id=%s status=%s",
+                        POLL_TIMEOUT, run.id, run.status,
+                    )
                     self.client.agents.cancel_run(thread_id=thread_id, run_id=run.id)
-                    return {"content": "I am experiencing delays connecting to the triage systems. Please try again.", "run_status": "error", "agent_role": role}
+                    return {
+                        "content": (
+                            "I am experiencing delays connecting to the triage systems. "
+                            "Please try again."
+                        ),
+                        "run_status": "error",
+                        "agent_role": role,
+                    }
                 time.sleep(0.5)
                 run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
-            elif run.status == "requires_action":
-                start_time = time.time()  # Reset timeout for tool execution and subsequent steps
-                # Extract tool calls and execute them concurrently
-                from mcp_server.server import (
-                    create_triage_record, handoff_to_agent, consult_agent, get_doctor_availability
-                )
-                import concurrent.futures
-                
-                tool_outputs = []
-                if hasattr(run, "required_action") and hasattr(run.required_action, "submit_tool_outputs"):
-                    
-                    def execute_single_tool(tool_call):
-                        func_name = tool_call.function.name
-                        try:
-                            args = json.loads(tool_call.function.arguments)
-                        except json.JSONDecodeError:
-                            args = {}
-                        
-                        output = None
-                        try:
-                            if func_name == "create_triage_record":
-                                output = create_triage_record(**args)
-                            elif func_name == "handoff_to_agent":
-                                output = handoff_to_agent(**args)
-                            elif func_name == "consult_agent":
-                                output = consult_agent(**args)
-                            elif func_name == "get_doctor_availability":
-                                output = get_doctor_availability(**args)
-                            else:
-                                output = {"error": f"Unknown tool: {func_name}"}
-                        except Exception as e:
-                            output = {"error": str(e)}
-                        
-                        return {
-                            "tool_call_id": tool_call.id,
-                            "output": json.dumps(output)
-                        }
 
-                    tool_calls = run.required_action.submit_tool_outputs.tool_calls
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                        futures = [executor.submit(execute_single_tool, tc) for tc in tool_calls]
-                        for future in concurrent.futures.as_completed(futures):
-                            tool_outputs.append(future.result())
-                    
-                    if tool_outputs:
-                        run = self.client.agents.submit_tool_outputs_to_run(
-                            thread_id=thread_id,
-                            run_id=run.id,
-                            tool_outputs=tool_outputs
-                        )
-                        
-                        # Check if handoff occurred
-                        handoff_target = None
-                        for tc in tool_calls:
-                            if tc.function.name == "handoff_to_agent":
-                                try:
-                                    args = json.loads(tc.function.arguments)
-                                    handoff_target = args.get("target_role")
-                                except:
-                                    pass
-                        
-                        if handoff_target:
-                            # We just wait for the current run to finish (it will likely be blank)
-                            while run.status in ["queued", "in_progress"]:
-                                time.sleep(0.5)
-                                run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
-                            
-                            # Automatically trigger the new agent
-                            new_agent_id = self.get_agent_id(handoff_target)
-                            new_instructions = (
-                                f"You ARE talking to user. THEY ARE ALREADY LOGGED IN. "
-                                "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
-                            )
-                            
-                            self.client.agents.create_message(
-                                thread_id=thread_id,
-                                role="user",
-                                content=f"[System Context: User was successfully transferred to {handoff_target}. Please introduce yourself and continue.]"
-                            )
-                            
-                            run = self.client.agents.create_run(
-                                thread_id=thread_id,
-                                assistant_id=new_agent_id,
-                                additional_instructions=new_instructions,
-                                max_completion_tokens=1000,
-                                truncation_strategy={"type": "last_messages", "last_messages": 10}
-                            )
-                            role = handoff_target # update role for final return
-                            
-                    else:
-                        break
-                else:
+            elif run.status == "requires_action":
+                start_time = time.time()  # reset so tool execution doesn't eat poll time
+
+                if not (
+                    hasattr(run, "required_action")
+                    and hasattr(run.required_action, "submit_tool_outputs")
+                ):
                     break
+
+                tool_calls = run.required_action.submit_tool_outputs.tool_calls
+                tool_outputs = self._run_tools_parallel(tool_calls)
+
+                if not tool_outputs:
+                    break
+
+                run = self.client.agents.submit_tool_outputs_to_run(
+                    thread_id=thread_id,
+                    run_id=run.id,
+                    tool_outputs=tool_outputs,
+                )
+
+                # Detect handoff and auto-trigger the target agent
+                handoff_target = None
+                for tc in tool_calls:
+                    if tc.function.name == "handoff_to_agent":
+                        try:
+                            handoff_target = json.loads(tc.function.arguments).get("target_role")
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+                        break
+
+                if handoff_target:
+                    handoff_start = time.time()
+                    while run.status in ("queued", "in_progress"):
+                        if time.time() - handoff_start > POLL_TIMEOUT:
+                            break
+                        time.sleep(0.5)
+                        run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
+
+                    new_agent_id = self.get_agent_id(handoff_target)
+                    self.client.agents.create_message(
+                        thread_id=thread_id,
+                        role="user",
+                        content=(
+                            f"[System Context: User was successfully transferred to "
+                            f"{handoff_target}. Please introduce yourself and continue.]"
+                        ),
+                    )
+                    run = self.client.agents.create_run(
+                        thread_id=thread_id,
+                        assistant_id=new_agent_id,
+                        additional_instructions=(
+                            "You ARE talking to the user. THEY ARE ALREADY LOGGED IN. "
+                            "Do NOT greet the user, they have been transferred to you. "
+                            "Continue the triage process smoothly."
+                        ),
+                        max_completion_tokens=1000,
+                        truncation_strategy={"type": "last_messages", "last_messages": 10},
+                    )
+                    role = handoff_target
+                    start_time = time.time()  # reset for new run
+
             else:
                 break
 
-        # Get latest assistant message
+        # Retrieve the latest assistant message
         messages = self.client.agents.list_messages(thread_id=thread_id)
-        
         content = ""
         for msg in messages.data:
             if msg.role == "assistant":
                 for block in msg.content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "text":
-                            content += block["text"]["value"]
-                    else:
-                        if getattr(block, "type", None) == "text":
-                            content += block.text.value
+                    if hasattr(block, 'text') and hasattr(block.text, 'value'):
+                        content += block.text.value
+                    elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
+                        content += block.text.value
+                    elif isinstance(block, dict) and block.get('type') == 'text':
+                        content += block.get('text', {}).get('value', '')
                 break
-        
+
         return {
             "content": content or "No response",
             "run_status": run.status,
-            "agent_role": role
+            "agent_role": role,
         }
 
+    # ------------------------------------------------------------------
+    # Streaming send
+    # ------------------------------------------------------------------
 
-
-    def send_message_stream(self, thread_id: str, message: str, role: str = "intake", user_data: dict = None):
-        """Streams message to a specific agent using Azure generator API."""
+    def send_message_stream(
+        self,
+        thread_id: str,
+        message: str,
+        role: str = "intake",
+        user_data: dict | None = None,
+    ) -> Generator:
+        """Stream a message to a specific agent and yield SSE-style JSON chunks."""
         agent_id = self.get_agent_id(role)
-        
-        # Add message to thread
-        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
-        
-        # Prepare personalization instructions if user_data is provided
-        additional_instructions = None
-        if user_data:
-            name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or "Guest"
-            email = user_data.get('email', 'unknown')
-            first_name = user_data.get('first_name') or name.split()[0] or "there"
-            
-            # Additional run instructions
-            if role == "intake":
-                additional_instructions = (
-                    f"You ARE talking to {name} (Email: {email}). "
-                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                    f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
-                )
-            else:
-                additional_instructions = (
-                    f"You ARE talking to {name} (Email: {email}). "
-                    "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                    "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
-                )
-            # Inject context into message for absolute certainty
-            if user_data.get('rolling_summary'):
-                additional_instructions += (
-                    f"\n\nCRITICAL CONTEXT (PREVIOUS SUMMARY): \n{user_data['rolling_summary']}\n"
-                    "Use this summary to understand the patient's history so far, as recent raw messages may be truncated."
-                )            
+        additional_instructions = self._build_additional_instructions(role, user_data)
+        context_message = self._build_context_message(thread_id, message, user_data)
 
-            message = f"[IDENTITY CONTEXT: User={name}, Email={email}]\n{message}"
-
-        # Add message to thread
-        context_message = f"[System Context: thread_id={thread_id}]\n{message}"
         try:
             self.client.agents.create_message(
                 thread_id=thread_id,
                 role="user",
-                content=context_message
+                content=context_message,
             )
-        except ServiceResponseTimeoutError as _te:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Timeout adding message to thread %s (cold-start?): %s", thread_id, _te
+        except ServiceResponseTimeoutError as exc:
+            logger.warning(
+                "Timeout adding message to thread %s (cold-start?): %s", thread_id, exc
             )
+
             def _timeout_gen():
                 yield json.dumps({
                     "type": "error",
-                    "content": "The AI service took too long to respond. Please wait a moment and try again."
+                    "content": (
+                        "The AI service took too long to respond. "
+                        "Please wait a moment and try again."
+                    ),
                 }) + "\n\n"
+
             return _timeout_gen()
-        
+
+        except SuspiciousOperation as exc:
+            logger.error("Disallowed host blocked during stream setup: %s", exc)
+
+            def _host_error_gen():
+                yield json.dumps({
+                    "type": "error",
+                    "content": "Request blocked: disallowed host.",
+                }) + "\n\n"
+
+            return _host_error_gen()
+
         def stream_generator():
             try:
-                def process_stream(current_stream, depth=0):
-                    """Process a stream, yielding chunks and handling tool calls inline.
-                    depth prevents infinite recursion (max 3 levels: init → tool_submit → handoff).
+                def process_stream(current_stream, depth: int = 0):
+                    """Recursively process a stream, handling tool calls and handoffs.
+
+                    depth cap:
+                      0 -> initial run
+                      1 -> tool-output re-stream
+                      2 -> handoff agent stream
+                      3 -> safety cap (return immediately)
                     """
                     if depth > 3:
                         return
-                    
+
                     run_id = None
-                    tool_calls = []
+                    tool_calls_seen = []
 
                     for event_tuple in current_stream:
                         if not isinstance(event_tuple, tuple) or len(event_tuple) != 2:
@@ -319,6 +379,7 @@ class AzureAgentClient:
 
                         if event_type == "thread.run.created":
                             run_id = getattr(event_data, "id", None)
+
                         elif event_type == "thread.message.delta":
                             for block in event_data.delta.content:
                                 if hasattr(block, 'text') and hasattr(block.text, 'value'):
@@ -331,57 +392,33 @@ class AzureAgentClient:
                                     text_val = block.get('text', {}).get('value', '')
                                     if text_val:
                                         yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+
                         elif event_type == "thread.run.requires_action":
-                            if hasattr(event_data, 'id'):
+                            if hasattr(event_data, "id"):
                                 run_id = event_data.id
-                            if hasattr(event_data, 'required_action') and hasattr(event_data.required_action, 'submit_tool_outputs'):
-                                tool_calls = list(event_data.required_action.submit_tool_outputs.tool_calls)
-                        # Don't yield 'done' here; we emit it once at the very end.
+                            if (
+                                hasattr(event_data, "required_action")
+                                and hasattr(event_data.required_action, "submit_tool_outputs")
+                            ):
+                                tool_calls_seen = list(
+                                    event_data.required_action.submit_tool_outputs.tool_calls
+                                )
 
-                    # --- Tool calls phase (runs AFTER the for-loop, outside the stream) ---
-                    if tool_calls and run_id:
-                        from mcp_server.server import (
-                            create_triage_record, handoff_to_agent, consult_agent, get_doctor_availability
-                        )
-                        import concurrent.futures
-
-                        def execute_single_tool(tc):
-                            func_name = tc.function.name
-                            try:
-                                args = json.loads(tc.function.arguments)
-                            except json.JSONDecodeError:
-                                args = {}
-                            try:
-                                if func_name == "create_triage_record":
-                                    output = create_triage_record(**args)
-                                elif func_name == "handoff_to_agent":
-                                    output = handoff_to_agent(**args)
-                                elif func_name == "consult_agent":
-                                    output = consult_agent(**args)
-                                elif func_name == "get_doctor_availability":
-                                    output = get_doctor_availability(**args)
-                                else:
-                                    output = {"error": f"Unknown tool: {func_name}"}
-                            except Exception as e:
-                                output = {"error": str(e)}
-                            return {"tool_call_id": tc.id, "output": json.dumps(output)}
-
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                            futures = [executor.submit(execute_single_tool, tc) for tc in tool_calls]
-                            tool_outputs = [f.result() for f in concurrent.futures.as_completed(futures)]
+                    # ---- Post-stream: execute tools ----
+                    if tool_calls_seen and run_id:
+                        tool_outputs = self._run_tools_parallel(tool_calls_seen)
 
                         if tool_outputs:
                             with self.client.agents.submit_tool_outputs_to_stream(
                                 thread_id=thread_id,
                                 run_id=run_id,
-                                tool_outputs=tool_outputs
+                                tool_outputs=tool_outputs,
                             ) as resubmit_stream:
                                 yield from process_stream(resubmit_stream, depth=depth + 1)
 
-                        # --- Handoff phase: auto-trigger next agent ---
-                        # Only at the outermost depth to avoid double-trigger after re-stream.
+                        # ---- Handoff (only at depth 0 to avoid double-trigger) ----
                         if depth == 0:
-                            for tc in tool_calls:
+                            for tc in tool_calls_seen:
                                 if tc.function.name == "handoff_to_agent":
                                     try:
                                         args = json.loads(tc.function.arguments)
@@ -389,80 +426,105 @@ class AzureAgentClient:
                                         if target_role:
                                             new_agent_id = self.get_agent_id(target_role)
                                             if new_agent_id:
-                                                yield json.dumps({"type": "chunk", "content": f"\n\n*[Transferring you to the {target_role} specialist...]*\n\n"}) + "\n\n"
+                                                yield json.dumps({
+                                                    "type": "chunk",
+                                                    "content": (
+                                                        f"\n\n*[Transferring you to the "
+                                                        f"{target_role} specialist...]*\n\n"
+                                                    ),
+                                                }) + "\n\n"
 
                                                 self.client.agents.create_message(
                                                     thread_id=thread_id,
                                                     role="user",
-                                                    content=f"[System: User transferred to {target_role}. Introduce yourself and continue.]"
+                                                    content=(
+                                                        f"[System: User transferred to {target_role}. "
+                                                        "Introduce yourself and continue.]"
+                                                    ),
                                                 )
                                                 with self.client.agents.create_stream(
                                                     thread_id=thread_id,
                                                     assistant_id=new_agent_id,
                                                     additional_instructions=(
-                                                        f"You ARE talking to the user. THEY ARE ALREADY LOGGED IN. "
-                                                        "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+                                                        "You ARE talking to the user. "
+                                                        "THEY ARE ALREADY LOGGED IN. "
+                                                        "Do NOT greet the user, they have been "
+                                                        "transferred to you. Continue smoothly."
                                                     ),
                                                     max_completion_tokens=1000,
-                                                    truncation_strategy={"type": "last_messages", "last_messages": 10}
+                                                    truncation_strategy={
+                                                        "type": "last_messages",
+                                                        "last_messages": 10,
+                                                    },
                                                 ) as handoff_stream:
-                                                    yield from process_stream(handoff_stream, depth=depth + 1)
-                                    except Exception as e:
-                                        print(f"Error auto-triggering handoff: {e}")
-                                    break  # Only handle first handoff
+                                                    yield from process_stream(
+                                                        handoff_stream, depth=depth + 1
+                                                    )
+                                    except (json.JSONDecodeError, KeyError) as exc:
+                                        logger.warning("Handoff parse error: %s", exc)
+                                    break  # Only handle the first handoff per run
 
                 with self.client.agents.create_stream(
                     thread_id=thread_id,
                     assistant_id=agent_id,
                     additional_instructions=additional_instructions,
                     max_completion_tokens=1000,
-                    truncation_strategy={"type": "last_messages", "last_messages": 10}
+                    truncation_strategy={"type": "last_messages", "last_messages": 10},
                 ) as initial_stream:
                     yield from process_stream(initial_stream, depth=0)
 
                 # Emit done exactly once after everything finishes
                 yield json.dumps({"type": "done", "run_status": "completed"}) + "\n\n"
 
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.exception(f"Failed to execute stream for thread {thread_id}")
-                yield json.dumps({"type": "error", "content": str(e)}) + "\n\n"
+            except SuspiciousOperation as exc:
+                logger.error("Disallowed host in stream: %s", exc)
+                yield json.dumps({"type": "error", "content": "Request blocked: disallowed host."}) + "\n\n"
+            except Exception as exc:
+                logger.exception("Failed to execute stream for thread %s", thread_id)
+                yield json.dumps({"type": "error", "content": str(exc)}) + "\n\n"
 
         return stream_generator()
 
 
-# Cache the client instance
-_client = None
+# ---------------------------------------------------------------------------
+# Module-level API (thread-safe singleton)
+# ---------------------------------------------------------------------------
 
 def get_project_client() -> AzureAgentClient:
     global _client
     if _client is None:
-        _client = AzureAgentClient()
+        with _client_lock:
+            if _client is None:  # double-checked locking
+                _client = AzureAgentClient()
     return _client
 
+
 def create_thread() -> str:
-    """Creates a new agent thread and returns its ID."""
+    """Create a new agent thread and return its ID."""
     try:
-        client = get_project_client()
-        return client.create_thread()
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
+        return get_project_client().create_thread()
+    except Exception:
         logger.exception("Failed to create Azure AI thread")
-        raise e
+        raise
 
 
-def send_message(thread_id: str, message: str, role: str = "intake", user_data: dict = None) -> dict:
-    """
-    Sends a message to the thread, runs the agent, and returns response.
-    """
-    client = get_project_client()
-    return client.send_message(thread_id, message, role=role, user_data=user_data)
+def send_message(
+    thread_id: str,
+    message: str,
+    role: str = "intake",
+    user_data: dict | None = None,
+) -> dict:
+    """Send a message, run the agent, and return the response dict."""
+    return get_project_client().send_message(thread_id, message, role=role, user_data=user_data)
 
-def send_message_stream(thread_id: str, message: str, role: str = "intake", user_data: dict = None):
-    """
-    Sends a message to the thread, runs the agent via stream, and returns a generator.
-    """
-    client = get_project_client()
-    return client.send_message_stream(thread_id, message, role=role, user_data=user_data)
+
+def send_message_stream(
+    thread_id: str,
+    message: str,
+    role: str = "intake",
+    user_data: dict | None = None,
+) -> Generator:
+    """Send a message via the streaming API and return a generator of SSE chunks."""
+    return get_project_client().send_message_stream(
+        thread_id, message, role=role, user_data=user_data
+    )
