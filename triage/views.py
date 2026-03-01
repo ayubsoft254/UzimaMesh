@@ -134,19 +134,21 @@ def patient_intake(request):
                         import logging
                         logger = logging.getLogger(__name__)
                         logger.exception("Failed to create thread during session recovery")
-                        thread_id = "local_mock_thread"
-                        latest_session.thread_id = thread_id
+                        thread_id = None  # Force recreation below
+                        latest_session.thread_id = None
                         latest_session.save()
-                        request.session['triage_thread_id'] = thread_id
+                        # Clear it from the session too
+                        if 'triage_thread_id' in request.session:
+                            del request.session['triage_thread_id']
     
-    # Clean up any legacy string "None" values
-    if thread_id == "None":
+    # Clean up any legacy mock values
+    if thread_id in ("None", "local_mock_thread", "mock_thread_id"):
         thread_id = None
 
     # 2. Fallback to Django session if not found in DB
     if not thread_id:
         thread_id = request.session.get('triage_thread_id')
-        if thread_id == "None":
+        if thread_id in ("None", "local_mock_thread", "mock_thread_id"):
             thread_id = None
     
     # 3. Create fresh thread and session if still not found
@@ -157,14 +159,17 @@ def patient_intake(request):
             import logging
             logger = logging.getLogger(__name__)
             logger.exception("Failed to create thread during patient intake")
-            thread_id = "local_mock_thread"
+            # If it fails, do not use 'local_mock_thread' as it crashes API requests.
+            # Instead, let the template handle no thread context or return an error state.
+            thread_id = None
             
-        request.session['triage_thread_id'] = thread_id
+        if thread_id:
+            request.session['triage_thread_id'] = thread_id
         
         # Eagerly create a shell session if authenticated
         if request.user.is_authenticated:
             patient = getattr(request.user, 'patient_profile', None)
-            if patient:
+            if patient and thread_id:
                 # Use get_or_create to avoid duplicates if user refreshes before chat starts
                 TriageSession.objects.get_or_create(
                     patient=patient,
