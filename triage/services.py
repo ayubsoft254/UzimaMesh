@@ -95,6 +95,8 @@ class AzureAgentClient:
         # With AZURE_CLIENT_ID + AZURE_CLIENT_SECRET set in .env, 
         # EnvironmentCredential will automatically authenticate via service principal
         # — no 'az login' required.
+        auth_credential = ApiKeyCredential(api_key) if api_key else CachedCredential()
+
         self.client = AIProjectClient.from_connection_string(
             credential=auth_credential,
             conn_str=conn_str,
