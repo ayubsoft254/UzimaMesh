@@ -35,14 +35,15 @@ class AzureAgentClient:
         rg_name = os.getenv("AZURE_RESOURCE_GROUP", "rg-uzima-mesh")
         project_name = os.getenv("AZURE_AI_PROJECT_NAME", "ai-uzima-mesh-project")
 
-        # Agent ID mapping
+        # Agent ID mapping (using a single agent for all roles for now)
+        single_agent_id = os.getenv("AZURE_AI_INTAKE_AGENT_ID") or os.getenv("AZURE_AI_AGENT_ID")
         self.agents: Dict[str, str | None] = {
-            "intake":       os.getenv("AZURE_AI_INTAKE_AGENT_ID"),
-            "guardian":     os.getenv("AZURE_AI_GUARDIAN_AGENT_ID"),
-            "orchestrator": os.getenv("AZURE_AI_ORCHESTRATOR_AGENT_ID"),
-            "analysis":     os.getenv("AZURE_AI_ANALYSIS_AGENT_ID"),
-            "scheduler":    os.getenv("AZURE_AI_SCHEDULER_AGENT_ID"),
-            "default":      os.getenv("AZURE_AI_AGENT_ID"),
+            "intake":       single_agent_id,
+            "guardian":     single_agent_id,
+            "orchestrator": single_agent_id,
+            "analysis":     single_agent_id,
+            "scheduler":    single_agent_id,
+            "default":      single_agent_id,
         }
 
         if not all([endpoint, self.agents["intake"]]):
@@ -195,7 +196,7 @@ class AzureAgentClient:
             thread_id=thread_id,
             assistant_id=agent_id,
             additional_instructions=additional_instructions,
-            max_completion_tokens=1000,
+            max_completion_tokens=10000,
             truncation_strategy={"type": "last_messages", "last_messages": 10},
         )
 
@@ -277,7 +278,7 @@ class AzureAgentClient:
                             "Do NOT greet the user, they have been transferred to you. "
                             "Continue the triage process smoothly."
                         ),
-                        max_completion_tokens=1000,
+                        max_completion_tokens=10000,
                         truncation_strategy={"type": "last_messages", "last_messages": 10},
                     )
                     role = handoff_target
@@ -451,7 +452,7 @@ class AzureAgentClient:
                                                         "Do NOT greet the user, they have been "
                                                         "transferred to you. Continue smoothly."
                                                     ),
-                                                    max_completion_tokens=1000,
+                                                    max_completion_tokens=10000,
                                                     truncation_strategy={
                                                         "type": "last_messages",
                                                         "last_messages": 10,
@@ -468,7 +469,7 @@ class AzureAgentClient:
                     thread_id=thread_id,
                     assistant_id=agent_id,
                     additional_instructions=additional_instructions,
-                    max_completion_tokens=1000,
+                    max_completion_tokens=10000,
                     truncation_strategy={"type": "last_messages", "last_messages": 10},
                 ) as initial_stream:
                     yield from process_stream(initial_stream, depth=0)
