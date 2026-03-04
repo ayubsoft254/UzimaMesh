@@ -36,10 +36,10 @@ Uzima Mesh is a modern, full-stack triage and healthcare coordination platform b
 
 ### Key Capabilities
 
-- **Real-Time AI Intake Agent** — Patients do not fill out long forms. Instead, they chat directly with an Azure AI Foundry Agent via the `azure-ai-projects` SDK. The conversational AI fluidly gathers demographics, symptoms, and medical history.
+- **Unified AI Agent Workflow** — Patients chat directly with a single Azure AI Foundry Agent via the `azure-ai-projects` SDK. The agent is dynamically re-prompted to handle intake, triage, emergency detection, and scheduling with an expanded 10,000 token limit.
 - **AI-Powered Triage** — After gathering sufficient information, the Azure Agent assigns an urgency score (1–5), generates a clinical summary, and can use tools to create the triage record directly in the backend.
 - **Doctor Command Center** — Authenticated doctors access a real-time dashboard to view, accept, escalate, or request vitals for queued triage sessions, sorted by priority.
-- **Model Context Protocol (MCP)** — An MCP server exposes tools like `get_doctor_availability` and `create_triage_record`, enabling AI agents to interact with the Django database programmatically.
+- **Model Context Protocol (MCP)** — An MCP server exposes tools like `get_doctor_availability` and `create_triage_record`, enabling the AI agent to interact with the Django database programmatically.
 - **Microsoft Entra ID SSO** — Enterprise-grade authentication via Azure AD / Microsoft Entra ID using `django-allauth`.
 - **Live Updates with HTMX** — Patient queues and doctor dashboards refresh via HTMX partial renders — no full-page reloads needed.
 
@@ -73,10 +73,15 @@ flowchart TD
 
     subgraph Foundry["☁️ Azure AI Foundry (azure-ai-projects SDK)"]
         direction TB
-        Intake["Intake Agent\nasst_rAQZ3vO6... · GPT-4o"]
-        Guardian["Guardian Agent\n24/7 Emergency Sentinel"]
-        Analysis["Analysis Agent\nClinical Guidelines · Urgency Scoring"]
-        Scheduler["Scheduler Agent\nAppointment Coordination"]
+        Agent["Unified AI Agent\n(GPT-4o, 10k Tokens)"]
+        Intake["Intake Role"]
+        Guardian["Guardian Role"]
+        Analysis["Analysis Role"]
+        Scheduler["Scheduler Role"]
+        Agent -.-> Intake
+        Agent -.-> Guardian
+        Agent -.-> Analysis
+        Agent -.-> Scheduler
     end
 
     subgraph DB["🗄️ Database (PostgreSQL / SQLite)"]
@@ -108,7 +113,7 @@ flowchart TD
 | Hero Technology | How It's Used | Where |
 |---|---|---|
 | **Azure AI Foundry** | Hosts the AI Hub + Project; agent definitions authored with Foundry agent schema `1.0.0`; `AIProjectClient` connects via Foundry connection string | `agents/*.agent.yaml`, `triage/services.py`, `infra/ai-foundry.bicep` |
-| **Microsoft Agent Framework** | `azure-ai-projects` SDK — creates threads, runs agents, streams responses, submits tool outputs, manages multi-agent handoffs | `triage/services.py` |
+| **Microsoft Agent Framework** | `azure-ai-projects` SDK — creates threads, runs agents, streams responses, submits tool outputs, manages dynamic role transitions | `triage/services.py` |
 | **Azure MCP** | `django-mcp` + `fastmcp` expose an SSE MCP server on the Django app; Foundry agents connect to it via `tools.type: mcp` to call Django ORM tools | `mcp_server/server.py`, `agents/Uzima-Intake-Agent.agent.yaml` |
 
 ### Azure Resources
@@ -124,25 +129,25 @@ All infrastructure is defined as Bicep IaC in `/infra/` and deployed via Azure D
 | **Azure Database for PostgreSQL Flexible Server** | `Standard_B1ms` · Burstable · PostgreSQL 15 · 32 GB | Production relational database |
 | **Azure Resource Group** | `azd`-managed | Logical container for all resources |
 
-### Multi-Agent Handoff Flow
+### Single Agent, Multi-Role Flow
 
 ```
 Patient Message
       │
       ▼
- Intake Agent  ──── consult_agent ────▶  Analysis Agent
+   Intake Role  ──── consult_agent ────▶  Analysis Role
       │                                       │
       │  (urgency confirmed)                  │ (returns score + guideline)
       │                                       │
-      └─── handoff_to_agent ────────▶  Scheduler Agent
+      └─── handoff_to_agent ────────▶  Scheduler Role
 ```
 
-1. **Intake Agent** greets the patient, collects HPI (History of Presenting Illness) one question at a time.
-2. If red-flag symptoms are detected, it calls `consult_agent` → **Guardian Agent** for immediate escalation.
-3. Once symptoms are gathered, it calls `consult_agent` → **Analysis Agent** to cross-reference Kenya National Clinical Guidelines and get a standardized urgency score.
-4. Finally it calls `create_triage_record` (MCP) to persist the session, then `handoff_to_agent` → **Scheduler Agent** to book follow-up.
+1. **Intake Role** greets the patient, collects HPI (History of Presenting Illness) one question at a time.
+2. If red-flag symptoms are detected it dynamically shifts to the **Guardian Role** for immediate escalation.
+3. Once symptoms are gathered, it assumes the **Analysis Role** to cross-reference Kenya National Clinical Guidelines and get a standardized urgency score.
+4. Finally it calls `create_triage_record` (MCP) to persist the session, then shifts to the **Scheduler Role** to book follow-up.
 
-All agent-to-agent communication happens on a **shared thread** managed by Azure AI Foundry Threads, with tool results submitted back via the Agent Framework.
+All role switching communication happens on a **shared thread** managed by Azure AI Foundry Threads, reusing the same Assistant ID but substituting dynamic system instructions, with an increased context window of 10,000 tokens to support complex, multi-turn medical triage.
 
 ### Project File Structure
 
