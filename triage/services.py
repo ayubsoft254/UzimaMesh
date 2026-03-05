@@ -98,13 +98,15 @@ class AzureAgentClient:
             instructions = (
                 f"You ARE talking to {name} (Email: {email}). "
                 "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'"
+                f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'\n"
+                "IMPORTANT: Ask a MAXIMUM of 3-4 questions about their symptoms. After that, STOP asking questions and provide a preliminary triage assessment directly."
             )
         else:
             instructions = (
                 f"You ARE talking to {name} (Email: {email}). "
                 "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly."
+                "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly.\n"
+                "IMPORTANT: Limit your questioning. Once you have a sufficient understanding, do not ask further questions and proceed with the assessment."
             )
 
         rolling_summary = user_data.get("rolling_summary")
