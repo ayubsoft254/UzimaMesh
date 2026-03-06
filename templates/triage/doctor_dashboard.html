@@ -50,7 +50,7 @@
                 class="absolute -top-4 -right-4 w-20 h-20 bg-mesh-500/5 rounded-full group-hover:bg-mesh-500/10 transition-colors">
             </div>
             <p class="text-[9px] font-bold text-mesh-500 uppercase tracking-[0.2em]">Active Ops</p>
-            <p class="text-3xl font-bold text-white mt-2">{{ stats.active_sessions }}</p>
+            <p class="text-3xl font-bold text-white mt-2" id="stat-active-sessions">{{ stats.active_sessions }}</p>
             <div class="mt-3 flex items-center space-x-2">
                 <div class="w-1.5 h-1.5 rounded-full bg-mesh-500 animate-pulse"></div>
                 <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Live</p>
@@ -64,7 +64,7 @@
                 class="absolute -top-4 -right-4 w-20 h-20 bg-red-500/5 rounded-full group-hover:bg-red-500/10 transition-colors">
             </div>
             <p class="text-[9px] font-bold text-red-500 uppercase tracking-[0.2em]">Critical</p>
-            <p class="text-3xl font-bold text-white mt-2">{{ stats.critical_cases }}</p>
+            <p class="text-3xl font-bold text-white mt-2" id="stat-critical-cases">{{ stats.critical_cases }}</p>
             <div class="mt-3">
                 <span
                     class="text-[8px] text-red-500 font-bold uppercase tracking-wider bg-red-500/10 px-2 py-0.5 rounded">Requires
@@ -79,7 +79,7 @@
                 class="absolute -top-4 -right-4 w-20 h-20 bg-amber-500/5 rounded-full group-hover:bg-amber-500/10 transition-colors">
             </div>
             <p class="text-[9px] font-bold text-amber-500 uppercase tracking-[0.2em]">In Queue</p>
-            <p class="text-3xl font-bold text-white mt-2">{{ stats.pending_cases }}</p>
+            <p class="text-3xl font-bold text-white mt-2" id="stat-pending-cases">{{ stats.pending_cases }}</p>
             <div class="mt-3 flex items-center space-x-2">
                 <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Awaiting Triage</p>
             </div>
@@ -92,7 +92,7 @@
                 class="absolute -top-4 -right-4 w-20 h-20 bg-green-500/5 rounded-full group-hover:bg-green-500/10 transition-colors">
             </div>
             <p class="text-[9px] font-bold text-green-500 uppercase tracking-[0.2em]">Efficiency</p>
-            <p class="text-3xl font-bold text-white mt-2">{{ stats.avg_wait_time }}<span
+            <p class="text-3xl font-bold text-white mt-2" id="stat-avg-wait">{{ stats.avg_wait_time }}<span
                     class="text-lg text-neutral-500 ml-1">min</span></p>
             <div class="mt-3 flex items-center space-x-2">
                 <p class="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Avg Response</p>
