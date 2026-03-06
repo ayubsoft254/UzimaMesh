@@ -488,6 +488,9 @@ def get_doctor_stats():
         ).count(),
         'avg_wait_time': 15,
     }
+    sessions = TriageSession.objects.select_related(
+        'patient', 'doctor'
+    ).order_by('-urgency_score', 'created_at')[:20]
 
 
 def doctor_dashboard(request):
@@ -502,6 +505,9 @@ def doctor_dashboard(request):
 
 def doctor_queue_updates(request):
     """HTMX partial: refresh the priority-sorted queue."""
+    sessions = TriageSession.objects.select_related(
+        'patient', 'doctor'
+    ).order_by('-urgency_score', 'created_at')[:20]
     sessions = get_ordered_doctor_queue()
     stats = get_doctor_stats()
     return render(request, 'triage/partials/doctor_queue_rows.html', {
@@ -512,28 +518,117 @@ def doctor_queue_updates(request):
 
 @require_POST
 def doctor_action(request, session_id):
-    """Handle doctor actions: accept, escalate, request vitals."""
+    """Handle doctor actions: accept, escalate, request vitals, complete."""
+    
     session = get_object_or_404(TriageSession, id=session_id)
     action = request.POST.get('action', '')
 
     if action == 'accept':
         session.status = 'IN_PROGRESS'
+
         if hasattr(request.user, 'doctor_profile'):
             session.doctor = request.user.doctor_profile
-        session.agent_logs += f"\n[Doctor] Case accepted"
-        session.save()
-    elif action == 'escalate':
-        session.urgency_score = min(session.urgency_score + 1, 5)
-        session.agent_logs += f"\n[Doctor] Case escalated to specialist"
-        session.save()
-    elif action == 'request_vitals':
-        session.agent_logs += f"\n[Doctor] Vitals request sent to nursing station"
-        session.save()
-    elif action == 'complete':
-        session.status = 'COMPLETED'
-        session.agent_logs += f"\n[Doctor] Case marked as completed"
+
+        session.agent_logs += f"\n[Doctor] Case accepted by {request.user}"
         session.save()
 
+
+    elif action == 'escalate':
+        session.status = 'ESCALATED'
+        session.urgency_score = min(session.urgency_score + 1, 5)
+
+        session.agent_logs += f"\n[Doctor] Case escalated"
+        session.save()
+
+
+    elif action == 'complete':
+        session.status = 'COMPLETED'
+        session.agent_logs += f"\n[Doctor] Case completed"
+        session.save()
+
+
+    elif action == 'request_vitals':
+        session.agent_logs += f"\n[Doctor] Requested vitals"
+        session.save()
+
+
+    sessions = TriageSession.objects.select_related(
+        'patient', 'doctor'
+    ).order_by('-urgency_score', 'created_at')[:20]
+
+    return render(
+        request,
+        'triage/partials/doctor_queue_rows.html',
+        {'sessions': sessions}
+    )
+    
+@require_POST
+def toggle_availability(request):
+
+    doctor = request.user.doctor_profile
+
+    doctor.is_available = not doctor.is_available
+    doctor.save()
+
+    return render(
+        request,
+        "triage/partials/doctor_availability.html",
+        {"doctor": doctor}
+    )
+    
+def reassign_session(request, session_id):
+    """Open the reassign modal"""
+
+    session = get_object_or_404(TriageSession, id=session_id)
+
+    doctors = Doctor.objects.filter(is_available=True)
+
+    return render(
+        request,
+        "triage/partials/reassign_modal.html",
+        {
+            "session": session,
+            "doctors": doctors
+        }
+    )
+
+
+@require_POST
+def confirm_reassign(request, session_id):
+    """Handle reassignment"""
+
+    session = get_object_or_404(TriageSession, id=session_id)
+
+    doctor_id = request.POST.get("doctor")
+
+    doctor = get_object_or_404(Doctor, id=doctor_id)
+
+    session.doctor = doctor
+    session.agent_logs += f"\n[System] Case reassigned to {doctor.user}"
+    session.save()
+
+    sessions = TriageSession.objects.select_related(
+        "patient",
+        "doctor"
+    ).order_by("-urgency_score", "created_at")[:20]
+
+    return render(
+        request,
+        "triage/partials/doctor_queue_rows.html",
+        {"sessions": sessions}
+    )
+    
+def doctor_notifications(request):
+
+    pending = TriageSession.objects.filter(
+        status='PENDING'
+    ).count()
+
+    return render(
+        request,
+        "triage/partials/notification_badge.html",
+        {"count": pending}
+    )
     # Return updated row
     sessions = get_ordered_doctor_queue()
     stats = get_doctor_stats()

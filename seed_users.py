@@ -31,9 +31,9 @@ def create_test_users():
         defaults={'email': 'smith@uzimamesh.com', 'first_name': 'John', 'last_name': 'Smith'}
     )
     if created:
-        doctor_user.set_password('uzima123')
+        doctor_user.set_password('Hellouzima123')
         doctor_user.save()
-        print("- Doctor User created: dr_smith / uzima123")
+        print("- Doctor User created: dr_smith / Hellouzima123")
     
     doctor_profile, created = Doctor.objects.get_or_create(
         user=doctor_user,

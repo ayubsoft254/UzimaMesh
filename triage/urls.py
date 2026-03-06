@@ -25,6 +25,11 @@ urlpatterns = [
     path('doctor/', views.doctor_dashboard, name='doctor_dashboard'),
     path('doctor/queue/', views.doctor_queue_updates, name='doctor_queue_updates'),
     path('doctor/action/<int:session_id>/', views.doctor_action, name='doctor_action'),
+    path('doctor/toggle-availability/', views.toggle_availability, name='toggle_availability'),
+    path('doctor/reassign/<int:session_id>/', views.reassign_session, name='reassign_session'),
+    path("doctor/reassign/<int:session_id>/confirm/", views.confirm_reassign),
+    path("doctor/notifications/", views.doctor_notifications),
+    
 
     # Admin Dashboard
     path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),

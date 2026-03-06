@@ -56,6 +56,12 @@
         {% elif session.status == 'COMPLETED' %}
         <span
             class="text-[8px] font-bold uppercase tracking-widest bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full border border-green-500/20">Completed</span>
+        {% elif session.status == 'ESCALATED' %}
+        <span
+            class="text-[8px] font-bold uppercase tracking-widest bg-red-500/10 text-red-400 px-2.5 py-1 rounded-full border border-red-500/20">Escalated</span>
+        {% elif session.status == 'REASSIGN' %}
+        <span
+            class="text-[8px] font-bold uppercase tracking-widest bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">Reassigned</span>
         {% else %}
         <span
             class="text-[8px] font-bold uppercase tracking-widest bg-neutral-500/10 text-neutral-400 px-2.5 py-1 rounded-full border border-neutral-500/20">{{
@@ -63,42 +69,81 @@
         {% endif %}
     </td>
 
-    <!-- Action Buttons -->
-    <td class="px-6 py-4 text-right">
-        <div class="flex items-center justify-end space-x-2 opacity-60 group-hover:opacity-100 transition-opacity">
-            {% if session.status == 'PENDING' %}
-            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="accept">
-                <button type="submit"
-                    class="text-[8px] font-bold uppercase tracking-wider bg-mesh-500/10 hover:bg-mesh-500 text-mesh-500 hover:text-white px-3 py-1.5 rounded-full border border-mesh-500/20 transition-all">
-                    Accept
-                </button>
-            </form>
-            {% endif %}
-            {% if session.status != 'COMPLETED' %}
-            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="escalate">
-                <button type="submit"
-                    class="text-[8px] font-bold uppercase tracking-wider bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white px-3 py-1.5 rounded-full border border-red-500/20 transition-all">
-                    Escalate
-                </button>
-            </form>
-            {% endif %}
-            {% if session.status == 'IN_PROGRESS' %}
-            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="complete">
-                <button type="submit"
-                    class="text-[8px] font-bold uppercase tracking-wider bg-green-500/10 hover:bg-green-500 text-green-400 hover:text-white px-3 py-1.5 rounded-full border border-green-500/20 transition-all">
-                    Complete
-                </button>
-            </form>
-            {% endif %}
-        </div>
-    </td>
-</tr>
+   <!-- Action Buttons -->
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end space-x-2 opacity-60 group-hover:opacity-100 transition-opacity">
+
+{% if session.status == 'PENDING' %}
+<form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+{% csrf_token %}
+<input type="hidden" name="action" value="accept">
+
+<button type="submit"
+class="text-[8px] font-bold uppercase tracking-wider
+bg-mesh-500/10 hover:bg-mesh-500
+text-mesh-500 hover:text-white
+px-3 py-1.5 rounded-full border border-mesh-500/20">
+
+Accept
+
+</button>
+</form>
+{% endif %}
+
+
+{% if session.status != 'ESCALATED' and session.status != 'COMPLETED' %}
+<form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+{% csrf_token %}
+<input type="hidden" name="action" value="escalate">
+
+<button type="submit"
+class="text-[8px] font-bold uppercase tracking-wider
+bg-red-500/10 hover:bg-red-500
+text-red-400 hover:text-white
+px-3 py-1.5 rounded-full border border-red-500/20">
+
+Escalate
+
+</button>
+</form>
+{% endif %}
+
+
+{% if session.status != 'COMPLETED' %}
+<form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+{% csrf_token %}
+<input type="hidden" name="action" value="complete">
+
+<button type="submit"
+class="text-[8px] font-bold uppercase tracking-wider
+bg-green-500/10 hover:bg-green-500
+text-green-400 hover:text-white
+px-3 py-1.5 rounded-full border border-green-500/20">
+
+Complete
+
+</button>
+</form>
+{% endif %}
+
+
+{% if session.status == 'IN_PROGRESS' or session.status == 'ESCALATED' %}
+<button
+hx-get="/doctor/reassign/{{ session.id }}/"
+hx-target="#modal"
+hx-swap="innerHTML"
+class="text-[10px] font-bold uppercase tracking-wider
+bg-blue-500/10 hover:bg-blue-500
+text-blue-400 hover:text-white
+px-3 py-1.5 rounded-full border border-blue-500/20">
+
+Reassign
+
+</button>
+{% endif %}
+
+</div>
+</td>
 
 <!-- Expandable AI Detail Row -->
 <tr id="summary-detail-{{ session.id }}" class="hidden border-b border-white/5">
