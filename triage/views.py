@@ -459,9 +459,23 @@ def api_chat_stream(request):
 # Doctor Command Center
 # ──────────────────────────────────────────────
 
-def doctor_dashboard(request):
-    """Render the doctor command center."""
-    stats = {
+from django.db.models import Case, When, Value, IntegerField
+
+def get_ordered_doctor_queue():
+    """Helper to return ordered triage sessions."""
+    return TriageSession.objects.select_related('patient', 'doctor').annotate(
+        status_order=Case(
+            When(status='IN_PROGRESS', then=Value(1)),
+            When(status='PENDING', then=Value(2)),
+            When(status='COMPLETED', then=Value(3)),
+            default=Value(4),
+            output_field=IntegerField(),
+        )
+    ).order_by('status_order', '-urgency_score', '-created_at')[:20]
+
+def get_doctor_stats():
+    """Helper to return doctor dashboard statistics."""
+    return {
         'active_sessions': TriageSession.objects.filter(
             status='IN_PROGRESS'
         ).count(),
@@ -474,9 +488,12 @@ def doctor_dashboard(request):
         ).count(),
         'avg_wait_time': 15,
     }
-    sessions = TriageSession.objects.select_related(
-        'patient', 'doctor'
-    ).all()[:20]
+
+
+def doctor_dashboard(request):
+    """Render the doctor command center."""
+    stats = get_doctor_stats()
+    sessions = get_ordered_doctor_queue()
     return render(request, 'triage/doctor_dashboard.html', {
         'stats': stats,
         'sessions': sessions,
@@ -485,11 +502,11 @@ def doctor_dashboard(request):
 
 def doctor_queue_updates(request):
     """HTMX partial: refresh the priority-sorted queue."""
-    sessions = TriageSession.objects.select_related(
-        'patient', 'doctor'
-    ).all()[:20]
+    sessions = get_ordered_doctor_queue()
+    stats = get_doctor_stats()
     return render(request, 'triage/partials/doctor_queue_rows.html', {
         'sessions': sessions,
+        'stats': stats,
     })
 
 
@@ -518,11 +535,11 @@ def doctor_action(request, session_id):
         session.save()
 
     # Return updated row
-    sessions = TriageSession.objects.select_related(
-        'patient', 'doctor'
-    ).all()[:20]
+    sessions = get_ordered_doctor_queue()
+    stats = get_doctor_stats()
     return render(request, 'triage/partials/doctor_queue_rows.html', {
         'sessions': sessions,
+        'stats': stats,
     })
 
 
