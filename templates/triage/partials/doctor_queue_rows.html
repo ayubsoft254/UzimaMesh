@@ -176,3 +176,17 @@ Reassign
         if (row) row.classList.toggle('hidden');
     }
 </script>
+
+<!-- HTMX Out-of-Band Swaps for Dashboard Stats -->
+<div id="stat-active-sessions" hx-swap-oob="innerHTML">
+    {{ stats.active_sessions }}
+</div>
+<div id="stat-critical-cases" hx-swap-oob="innerHTML">
+    {{ stats.critical_cases }}
+</div>
+<div id="stat-pending-cases" hx-swap-oob="innerHTML">
+    {{ stats.pending_cases }}
+</div>
+<div id="stat-avg-wait" hx-swap-oob="innerHTML">
+    {{ stats.avg_wait_time }}<span class="text-lg text-neutral-500 ml-1">min</span>
+</div>

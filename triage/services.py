@@ -152,20 +152,37 @@ class AzureAgentClient:
             args = {}
 
         try:
+            import inspect
+            from asgiref.sync import async_to_sync
+
+            async def await_res(res):
+                return await res
+
+            def run_sync(tool_func, **kw):
+                res = tool_func(**kw)
+                if inspect.isawaitable(res):
+                    return async_to_sync(await_res)(res)
+                return res
+
             if func_name == "create_triage_record":
-                output = create_triage_record(**args)
+                output = run_sync(create_triage_record, **args)
             elif func_name == "handoff_to_agent":
-                output = handoff_to_agent(**args)
+                output = run_sync(handoff_to_agent, **args)
             elif func_name == "consult_agent":
-                output = consult_agent(**args)
+                output = run_sync(consult_agent, **args)
             elif func_name == "get_doctor_availability":
-                output = get_doctor_availability(**args)
+                output = run_sync(get_doctor_availability, **args)
             else:
                 output = {"error": f"Unknown tool: {func_name}"}
         except Exception as exc:
             output = {"error": str(exc)}
 
-        return {"tool_call_id": tool_call.id, "output": json.dumps(output)}
+        try:
+            output_str = json.dumps(output)
+        except Exception as exc:
+            output_str = json.dumps({"error": f"Unserializable output: {str(exc)}"})
+
+        return {"tool_call_id": tool_call.id, "output": output_str}
 
     def _run_tools_parallel(self, tool_calls) -> list:
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
