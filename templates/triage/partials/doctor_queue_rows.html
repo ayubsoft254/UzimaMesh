@@ -69,83 +69,76 @@
         {% endif %}
     </td>
 
-   <!-- Action Buttons -->
-<td class="px-6 py-4 text-right">
-<div class="flex items-center justify-end space-x-2 opacity-60 group-hover:opacity-100 transition-opacity">
+    <!-- Action Buttons -->
+    <td class="px-6 py-4 text-right">
+        <div class="flex items-center justify-end space-x-2 opacity-60 group-hover:opacity-100 transition-opacity">
 
-{% if session.status == 'PENDING' %}
-<form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
-{% csrf_token %}
-<input type="hidden" name="action" value="accept">
+            {% if session.status == 'PENDING' %}
+            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="accept">
 
-<button type="submit"
-class="text-[8px] font-bold uppercase tracking-wider
+                <button type="submit" class="text-[8px] font-bold uppercase tracking-wider
 bg-mesh-500/10 hover:bg-mesh-500
 text-mesh-500 hover:text-white
 px-3 py-1.5 rounded-full border border-mesh-500/20">
 
-Accept
+                    Accept
 
-</button>
-</form>
-{% endif %}
+                </button>
+            </form>
+            {% endif %}
 
 
-{% if session.status != 'ESCALATED' and session.status != 'COMPLETED' %}
-<form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
-{% csrf_token %}
-<input type="hidden" name="action" value="escalate">
+            {% if session.status != 'ESCALATED' and session.status != 'COMPLETED' %}
+            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="escalate">
 
-<button type="submit"
-class="text-[8px] font-bold uppercase tracking-wider
+                <button type="submit" class="text-[8px] font-bold uppercase tracking-wider
 bg-red-500/10 hover:bg-red-500
 text-red-400 hover:text-white
 px-3 py-1.5 rounded-full border border-red-500/20">
 
-Escalate
+                    Escalate
 
-</button>
-</form>
-{% endif %}
+                </button>
+            </form>
+            {% endif %}
 
 
-{% if session.status != 'COMPLETED' %}
-<form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
-{% csrf_token %}
-<input type="hidden" name="action" value="complete">
+            {% if session.status != 'COMPLETED' %}
+            <form hx-post="/doctor/action/{{ session.id }}/" hx-target="#queue-body" hx-swap="innerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="complete">
 
-<button type="submit"
-class="text-[8px] font-bold uppercase tracking-wider
+                <button type="submit" class="text-[8px] font-bold uppercase tracking-wider
 bg-green-500/10 hover:bg-green-500
 text-green-400 hover:text-white
 px-3 py-1.5 rounded-full border border-green-500/20">
 
-Complete
+                    Complete
 
-</button>
-</form>
-{% endif %}
+                </button>
+            </form>
+            {% endif %}
 
 
-{% if session.status == 'IN_PROGRESS' or session.status == 'ESCALATED' %}
-<button
-hx-get="/doctor/reassign/{{ session.id }}/"
-hx-target="#modal"
-hx-swap="innerHTML"
-class="text-[10px] font-bold uppercase tracking-wider
+            {% if session.status == 'IN_PROGRESS' or session.status == 'ESCALATED' %}
+            <button hx-get="/doctor/reassign/{{ session.id }}/" hx-target="#modal" hx-swap="innerHTML" class="text-[10px] font-bold uppercase tracking-wider
 bg-blue-500/10 hover:bg-blue-500
 text-blue-400 hover:text-white
 px-3 py-1.5 rounded-full border border-blue-500/20">
 
-Reassign
+                Reassign
 
-</button>
-{% endif %}
+            </button>
+            {% endif %}
 
-</div>
-</td>
+        </div>
+    </td>
 
-<!-- Expandable AI Detail Row -->
+    <!-- Expandable AI Detail Row -->
 <tr id="summary-detail-{{ session.id }}" class="hidden border-b border-white/5">
     <td colspan="5" class="px-6 py-4 bg-white/[0.01]">
         <div class="row-expand grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl">
@@ -176,17 +169,3 @@ Reassign
         if (row) row.classList.toggle('hidden');
     }
 </script>
-
-<!-- HTMX Out-of-Band Swaps for Dashboard Stats -->
-<div id="stat-active-sessions" hx-swap-oob="innerHTML">
-    {{ stats.active_sessions }}
-</div>
-<div id="stat-critical-cases" hx-swap-oob="innerHTML">
-    {{ stats.critical_cases }}
-</div>
-<div id="stat-pending-cases" hx-swap-oob="innerHTML">
-    {{ stats.pending_cases }}
-</div>
-<div id="stat-avg-wait" hx-swap-oob="innerHTML">
-    {{ stats.avg_wait_time }}<span class="text-lg text-neutral-500 ml-1">min</span>
-</div>

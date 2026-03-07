@@ -488,16 +488,15 @@ def get_doctor_stats():
         ).count(),
         'avg_wait_time': 15,
     }
-    sessions = TriageSession.objects.select_related(
-        'patient', 'doctor'
-    ).order_by('-urgency_score', 'created_at')[:20]
 
 
 def doctor_dashboard(request):
     """Render the doctor command center."""
+    doctor = getattr(request.user, 'doctor_profile', None)
     stats = get_doctor_stats()
     sessions = get_ordered_doctor_queue()
     return render(request, 'triage/doctor_dashboard.html', {
+        'doctor': doctor,
         'stats': stats,
         'sessions': sessions,
     })
@@ -505,9 +504,6 @@ def doctor_dashboard(request):
 
 def doctor_queue_updates(request):
     """HTMX partial: refresh the priority-sorted queue."""
-    sessions = TriageSession.objects.select_related(
-        'patient', 'doctor'
-    ).order_by('-urgency_score', 'created_at')[:20]
     sessions = get_ordered_doctor_queue()
     stats = get_doctor_stats()
     return render(request, 'triage/partials/doctor_queue_rows.html', {
@@ -552,14 +548,13 @@ def doctor_action(request, session_id):
         session.save()
 
 
-    sessions = TriageSession.objects.select_related(
-        'patient', 'doctor'
-    ).order_by('-urgency_score', 'created_at')[:20]
+    sessions = get_ordered_doctor_queue()
+    stats = get_doctor_stats()
 
     return render(
         request,
         'triage/partials/doctor_queue_rows.html',
-        {'sessions': sessions}
+        {'sessions': sessions, 'stats': stats}
     )
     
 @require_POST
@@ -607,15 +602,13 @@ def confirm_reassign(request, session_id):
     session.agent_logs += f"\n[System] Case reassigned to {doctor.user}"
     session.save()
 
-    sessions = TriageSession.objects.select_related(
-        "patient",
-        "doctor"
-    ).order_by("-urgency_score", "created_at")[:20]
+    sessions = get_ordered_doctor_queue()
+    stats = get_doctor_stats()
 
     return render(
         request,
         "triage/partials/doctor_queue_rows.html",
-        {"sessions": sessions}
+        {"sessions": sessions, "stats": stats}
     )
     
 def doctor_notifications(request):
@@ -629,13 +622,6 @@ def doctor_notifications(request):
         "triage/partials/notification_badge.html",
         {"count": pending}
     )
-    # Return updated row
-    sessions = get_ordered_doctor_queue()
-    stats = get_doctor_stats()
-    return render(request, 'triage/partials/doctor_queue_rows.html', {
-        'sessions': sessions,
-        'stats': stats,
-    })
 
 
 # ──────────────────────────────────────────────
