@@ -80,6 +80,11 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'uzima_mesh.urls'
 
+# Session settings (15 minutes of inactivity timeout)
+SESSION_COOKIE_AGE = 15 * 60  
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_SAVE_EVERY_REQUEST = True
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',

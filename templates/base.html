@@ -311,6 +311,47 @@
         }
     </script>
     {% block extra_js %}{% endblock %}
+
+    {% if user.is_authenticated %}
+    <script>
+        // Session timeout implementation (15 minutes of inactivity)
+        (function () {
+            const timeoutDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+            let timeoutId;
+
+            function resetTimer() {
+                clearTimeout(timeoutId);
+                timeoutId = setTimeout(logoutUser, timeoutDuration);
+            }
+
+            function logoutUser() {
+                // Create a hidden form to perform a POST logout
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = "{% url 'account_logout' %}";
+
+                const csrfToken = document.createElement('input');
+                csrfToken.type = 'hidden';
+                csrfToken.name = 'csrfmiddlewaretoken';
+                csrfToken.value = '{{ csrf_token }}';
+
+                form.appendChild(csrfToken);
+                document.body.appendChild(form);
+                form.submit();
+            }
+
+            // Listen for user activity
+            const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+            activityEvents.forEach(event => {
+                document.addEventListener(event, resetTimer, { passive: true });
+            });
+
+            // Initialize timer on load
+            resetTimer();
+        })();
+    </script>
+    {% endif %}
+
 </body>
 
 </html>
