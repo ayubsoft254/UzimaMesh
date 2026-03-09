@@ -76,6 +76,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'allauth.account.middleware.AccountMiddleware',
     'django_htmx.middleware.HtmxMiddleware',
+    'uzima_mesh.middleware.SessionRefreshMiddleware',
 ]
 
 ROOT_URLCONF = 'uzima_mesh.urls'
@@ -83,7 +84,6 @@ ROOT_URLCONF = 'uzima_mesh.urls'
 # Session settings (15 minutes of inactivity timeout)
 SESSION_COOKIE_AGE = 15 * 60  
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-SESSION_SAVE_EVERY_REQUEST = True
 
 TEMPLATES = [
     {

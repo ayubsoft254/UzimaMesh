@@ -317,37 +317,49 @@
         // Session timeout implementation (15 minutes of inactivity)
         (function () {
             const timeoutDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+            const throttleDuration = 10 * 1000; // Throttle activity updates to every 10 seconds
             let timeoutId;
+            let lastActivityTime = Date.now();
 
             function resetTimer() {
+                const now = Date.now();
+                // Only reset if it's been at least 10 seconds since we last registered activity
+                // to avoid doing work on every single keydown/scroll event
+                if (now - lastActivityTime > throttleDuration) {
+                    lastActivityTime = now;
+                    clearTimeout(timeoutId);
+                    timeoutId = setTimeout(logoutUser, timeoutDuration);
+                }
+            }
+
+            // Initial setup of the timer limit without the throttle restriction
+            function startTimer() {
+                lastActivityTime = Date.now();
                 clearTimeout(timeoutId);
                 timeoutId = setTimeout(logoutUser, timeoutDuration);
             }
 
             function logoutUser() {
-                // Create a hidden form to perform a POST logout
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = "{% url 'account_logout' %}";
+                // Find the existing logout form on the page instead of building a new one
+                // The existing form will definitively have a valid CSRF token if it exists
+                const existingForm = document.querySelector('form[action="{% url 'account_logout' %}"]');
 
-                const csrfToken = document.createElement('input');
-                csrfToken.type = 'hidden';
-                csrfToken.name = 'csrfmiddlewaretoken';
-                csrfToken.value = '{{ csrf_token }}';
-
-                form.appendChild(csrfToken);
-                document.body.appendChild(form);
-                form.submit();
+                if (existingForm) {
+                    existingForm.submit();
+                } else {
+                    // Fallback to a redirect if we can't find the form (e.g., if UI changed)
+                    window.location.href = "{% url 'account_logout' %}";
+                }
             }
 
-            // Listen for user activity
-            const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+            // Listen for user activity with dropped mousemove freq
+            const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
             activityEvents.forEach(event => {
                 document.addEventListener(event, resetTimer, { passive: true });
             });
 
             // Initialize timer on load
-            resetTimer();
+            startTimer();
         })();
     </script>
     {% endif %}
