@@ -43,6 +43,8 @@ timeout 60 python manage.py migrate --noinput || {
 
 # ─── 3. Seed test data (only when explicitly requested) ─────────────────────
 if [ "${SEED_ON_STARTUP}" = "true" ]; then
+    echo "Flushing database..."
+    python manage.py flush --noinput
     echo "Seeding test data..."
     python manage.py seed_data
 else
