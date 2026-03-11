@@ -163,6 +163,16 @@ px-3 py-1.5 rounded-full border border-blue-500/20">
 </tr>
 {% endfor %}
 
+{% if stats %}
+<!-- Out Of Band updates for doctor stats to keep them perfectly in sync -->
+<p id="stat-active-sessions" hx-swap-oob="true" class="text-3xl font-bold text-white mt-2">{{ stats.active_sessions }}
+</p>
+<p id="stat-critical-cases" hx-swap-oob="true" class="text-3xl font-bold text-white mt-2">{{ stats.critical_cases }}</p>
+<p id="stat-pending-cases" hx-swap-oob="true" class="text-3xl font-bold text-white mt-2">{{ stats.pending_cases }}</p>
+<p id="stat-avg-wait" hx-swap-oob="true" class="text-3xl font-bold text-white mt-2">{{ stats.avg_wait_time }}<span
+        class="text-lg text-neutral-500 ml-1">min</span></p>
+{% endif %}
+
 <script>
     function toggleSummary(id) {
         const row = document.getElementById('summary-detail-' + id);
