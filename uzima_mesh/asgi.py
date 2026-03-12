@@ -11,6 +11,24 @@ django_asgi_app = get_asgi_application()
 import mcp_server.server  # noqa: F401, E402 — registers MCP tools (side-effect import)
 
 try:
+    from django_mcp import asgi as django_mcp_asgi
+    import django_mcp.asgi_patch_fastmcp as patch_module
+    from starlette.responses import Response
+
+    original_patch = patch_module.FastMCP_sse_app_patch
+
+    def patched_FastMCP_sse_app_patch(*args, **kwargs):
+        handle_sse, sse = original_patch(*args, **kwargs)
+
+        async def wrapped_handle_sse(request):
+            await handle_sse(request)
+            return Response()  # Fix TypeError: 'NoneType' object is not callable
+
+        return wrapped_handle_sse, sse
+
+    django_mcp_asgi.FastMCP_sse_app_patch = patched_FastMCP_sse_app_patch
+    patch_module.FastMCP_sse_app_patch = patched_FastMCP_sse_app_patch
+
     from django_mcp.asgi import mount_mcp_server
     # Mount the MCP server at /mcp — exposes /mcp/sse and /mcp/messages/
     application = mount_mcp_server(django_asgi_app, mcp_base_path='/mcp')
