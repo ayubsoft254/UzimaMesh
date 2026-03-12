@@ -311,13 +311,15 @@ class AzureAgentClient:
         content = ""
         for msg in messages.data:
             if msg.role == "assistant":
-                for block in msg.content:
+                for block in getattr(msg, "content", []):
                     if hasattr(block, 'text') and hasattr(block.text, 'value'):
                         content += block.text.value
                     elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
-                        content += block.text.value
-                    elif isinstance(block, dict) and block.get('type') == 'text':
-                        content += block.get('text', {}).get('value', '')
+                        content += block.text.value if hasattr(block.text, 'value') else getattr(block.text, 'value', str(block.text))
+                    elif isinstance(block, dict):
+                        text_val = block.get('text', {}).get('value', '') if isinstance(block.get('text'), dict) else block.get('text', '')
+                        if text_val:
+                            content += text_val
                 break
 
         return {
@@ -401,17 +403,22 @@ class AzureAgentClient:
                             run_id = getattr(event_data, "id", None)
 
                         elif event_type == "thread.message.delta":
-                            for block in event_data.delta.content:
+                            for block in getattr(event_data.delta, "content", []):
                                 if hasattr(block, 'text') and hasattr(block.text, 'value'):
                                     text_val = block.text.value
                                     yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
                                 elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
-                                    text_val = block.text.value
+                                    # Fallback if structure is slightly different but still an object
+                                    text_val = block.text.value if hasattr(block.text, 'value') else getattr(block.text, 'value', str(block.text))
                                     yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
-                                elif isinstance(block, dict) and block.get('type') == 'text':
-                                    text_val = block.get('text', {}).get('value', '')
+                                elif isinstance(block, dict):
+                                    # Fallback if it parses as a pure dict
+                                    text_val = block.get('text', {}).get('value', '') if isinstance(block.get('text'), dict) else block.get('text', '')
                                     if text_val:
                                         yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+                                else:
+                                    # Last resort safely stringify
+                                    logger.debug("Unknown block type in delta: %s", block)
 
                         elif event_type == "thread.run.requires_action":
                             if hasattr(event_data, "id"):
