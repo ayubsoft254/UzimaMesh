@@ -394,42 +394,34 @@ class AzureAgentClient:
                     run_id = None
                     tool_calls_seen = []
 
-                    for event_tuple in current_stream:
-                        if not isinstance(event_tuple, tuple) or len(event_tuple) != 2:
-                            continue
-                        event_type, event_data = event_tuple
+                    for event_item in current_stream:
+                        event_type = getattr(event_item, "event", getattr(event_item, "type", type(event_item).__name__))
+                        event_data = getattr(event_item, "data", event_item)
 
-                        if event_type == "thread.run.created":
+                        if event_type == "thread.run.created" or "RunCreated" in type(event_data).__name__:
                             run_id = getattr(event_data, "id", None)
 
-                        elif event_type == "thread.message.delta":
-                            for block in getattr(event_data.delta, "content", []):
+                        elif event_type == "thread.message.delta" or "MessageDelta" in type(event_data).__name__:
+                            delta_obj = getattr(event_data, "delta", event_data)
+                            for block in getattr(delta_obj, "content", []):
                                 if hasattr(block, 'text') and hasattr(block.text, 'value'):
                                     text_val = block.text.value
                                     yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
                                 elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
-                                    # Fallback if structure is slightly different but still an object
                                     text_val = block.text.value if hasattr(block.text, 'value') else getattr(block.text, 'value', str(block.text))
                                     yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
                                 elif isinstance(block, dict):
-                                    # Fallback if it parses as a pure dict
                                     text_val = block.get('text', {}).get('value', '') if isinstance(block.get('text'), dict) else block.get('text', '')
                                     if text_val:
                                         yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
                                 else:
-                                    # Last resort safely stringify
                                     logger.debug("Unknown block type in delta: %s", block)
 
-                        elif event_type == "thread.run.requires_action":
+                        elif event_type == "thread.run.requires_action" or "RequiresAction" in type(event_data).__name__:
                             if hasattr(event_data, "id"):
                                 run_id = event_data.id
-                            if (
-                                hasattr(event_data, "required_action")
-                                and hasattr(event_data.required_action, "submit_tool_outputs")
-                            ):
-                                tool_calls_seen = list(
-                                    event_data.required_action.submit_tool_outputs.tool_calls
-                                )
+                            if hasattr(event_data, "required_action") and hasattr(event_data.required_action, "submit_tool_outputs"):
+                                tool_calls_seen = list(event_data.required_action.submit_tool_outputs.tool_calls)
 
                     # ---- Post-stream: execute tools ----
                     if tool_calls_seen and run_id:
