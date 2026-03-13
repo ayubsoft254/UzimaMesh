@@ -58,8 +58,21 @@ class AzureAgentClient:
         host = endpoint.replace("https://", "").rstrip("/")
         conn_str = f"{host};{sub_id};{rg_name};{project_name}"
 
+        api_key = os.getenv("AZURE_AI_API_KEY")
+        if not api_key:
+             credential = DefaultAzureCredential()
+        else:
+            # We must wrap the raw API Key in a TokenCredential interface to satisfy the AIProjectClient
+            from azure.core.credentials import AccessToken
+            class GenericTokenCredential:
+                def __init__(self, key):
+                     self.key = key
+                def get_token(self, *scopes, **kwargs):
+                     return AccessToken(self.key, int(time.time()) + 3600)
+            credential = GenericTokenCredential(api_key)
+
         self.client = AIProjectClient.from_connection_string(
-            credential=DefaultAzureCredential(),
+            credential=credential,
             conn_str=conn_str,
             connection_timeout=30,
             read_timeout=90,
