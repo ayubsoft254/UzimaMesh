@@ -71,8 +71,20 @@ class AzureAgentClient:
 
     def create_thread(self) -> str:
         """Create a new agent thread and return its ID."""
-        thread = self.client.agents.create_thread()
-        return thread.id
+        import random
+        for attempt in range(3):
+            try:
+                thread = self.client.agents.create_thread()
+                return thread.id
+            except ServiceResponseTimeoutError as exc:
+                if attempt == 2:
+                    raise
+                # Exponential backoff with jitter: wait 2s, then 4s, +/- up to 0.5s
+                base_sleep = 2 ** (attempt + 1)
+                jitter = random.uniform(-0.5, 0.5)
+                wait_time = base_sleep + jitter
+                logger.warning("Timeout creating thread, retrying in %.1fs... (attempt %d/3)", wait_time, attempt + 1, exc_info=exc)
+                time.sleep(wait_time)
 
     def get_agent_id(self, role: str = "intake") -> str | None:
         """Return the agent ID for *role*, falling back to 'default'."""
