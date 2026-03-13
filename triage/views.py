@@ -379,23 +379,57 @@ async def api_chat_stream(request):
     context_msg = f"[Context: session_id={session_id}]\n{user_message}" if session_id else user_message
 
     async def _async_stream(sync_gen, sess):
-        """Consume sync generator in thread pool, yielding SSE chunks."""
-        full_content = ""
+        """
+        Consume a sync generator safely by running it entirely on one background
+        thread and piping chunks through a queue.
+
+        The Azure SDK's create_stream() uses a `with` context manager that must
+        stay open for the lifetime of the generator. Calling next() repeatedly
+        via run_in_executor() is unsafe because each call may use a different
+        thread, breaking the context manager's internal state and causing the
+        stream to appear empty. Running the whole generator on ONE thread avoids
+        this entirely.
+        """
+        import queue as queue_module
+
+        chunk_queue = queue_module.Queue()
+        _DONE = object()
+        _ERROR = object()
+
+        def _drain_generator():
+            """Run entirely on a single background thread."""
+            try:
+                for chunk in sync_gen:
+                    chunk_queue.put(chunk)
+            except Exception as exc:
+                chunk_queue.put((_ERROR, exc))
+            finally:
+                chunk_queue.put(_DONE)
+
         loop = asyncio.get_running_loop()
-        it = iter(sync_gen)
-        _SENTINEL = object()
+        # Submit the drainer to the executor — it runs start-to-finish on one thread
+        drain_future = loop.run_in_executor(None, _drain_generator)
+
+        full_content = ""
 
         while True:
+            # Poll the queue without blocking the event loop
             try:
-                chunk = await loop.run_in_executor(None, next, it, _SENTINEL)
-            except Exception as exc:
-                logger.exception("Error reading stream chunk")
+                item = chunk_queue.get_nowait()
+            except queue_module.Empty:
+                await asyncio.sleep(0.01)
+                continue
+
+            if item is _DONE:
+                break
+
+            if isinstance(item, tuple) and len(item) == 2 and item[0] is _ERROR:
+                _, exc = item
+                logger.exception("Error reading stream chunk: %s", exc)
                 yield json.dumps({"type": "error", "content": str(exc)}) + "\n\n"
                 break
 
-            if chunk is _SENTINEL:
-                break
-
+            chunk = item
             try:
                 parsed = json.loads(chunk.strip())
                 if parsed.get('type') == 'chunk':
@@ -404,6 +438,9 @@ async def api_chat_stream(request):
                 pass
 
             yield chunk
+
+        # Ensure the background thread finishes cleanly
+        await drain_future
 
         # Persist full agent response and trigger summary if needed
         if sess and full_content:
