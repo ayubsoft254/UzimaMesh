@@ -58,12 +58,10 @@ class AzureAgentClient:
         host = endpoint.replace("https://", "").rstrip("/")
         conn_str = f"{host};{sub_id};{rg_name};{project_name}"
 
-        # Strip injected Client ID so Azure App Service uses System-Assigned Managed Identity
-        os.environ.pop("AZURE_CLIENT_ID", None)
-        os.environ.pop("AZURE_CLIENT_SECRET", None)
-
+        # We pass exclude_environment_credential=True so Azure App Service uses
+        # System-Assigned Managed Identity, rather than any injected Client ID App Settings
         self.client = AIProjectClient.from_connection_string(
-            credential=DefaultAzureCredential(),
+            credential=DefaultAzureCredential(exclude_environment_credential=True),
             conn_str=conn_str,
             connection_timeout=30,
             read_timeout=90,
