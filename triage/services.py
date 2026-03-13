@@ -226,11 +226,14 @@ class AzureAgentClient:
         additional_instructions = self._build_additional_instructions(role, user_data)
         context_message = self._build_context_message(thread_id, message, user_data)
 
+        logger.info("send_message: thread_id=%s, role=%s, agent_id=%s", thread_id, role, agent_id)
+
         self.client.agents.create_message(
             thread_id=thread_id,
             role="user",
             content=context_message,
         )
+        logger.debug("send_message: Message created for thread %s", thread_id)
 
         run = self.client.agents.create_run(
             thread_id=thread_id,
@@ -239,11 +242,14 @@ class AzureAgentClient:
             max_completion_tokens=10000,
             truncation_strategy={"type": "last_messages", "last_messages": 10},
         )
+        logger.info("send_message: Run created: run_id=%s, status=%s", run.id, run.status)
 
         start_time = time.time()
         POLL_TIMEOUT = 60  # seconds
+        poll_count = 0
 
         while True:
+            poll_count += 1
             if run.status in ("queued", "in_progress"):
                 if time.time() - start_time > POLL_TIMEOUT:
                     logger.warning(
@@ -261,20 +267,25 @@ class AzureAgentClient:
                     }
                 time.sleep(0.5)
                 run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
+                logger.debug("send_message: Poll #%d - status=%s", poll_count, run.status)
 
             elif run.status == "requires_action":
                 start_time = time.time()  # reset so tool execution doesn't eat poll time
+                logger.info("send_message: Run requires_action - processing tools")
 
                 if not (
                     hasattr(run, "required_action")
                     and hasattr(run.required_action, "submit_tool_outputs")
                 ):
+                    logger.warning("send_message: requires_action present but no submit_tool_outputs")
                     break
 
                 tool_calls = run.required_action.submit_tool_outputs.tool_calls
+                logger.info("send_message: Found %d tool call(s)", len(tool_calls))
                 tool_outputs = self._run_tools_parallel(tool_calls)
 
                 if not tool_outputs:
+                    logger.warning("send_message: No tool outputs generated")
                     break
 
                 run = self.client.agents.submit_tool_outputs_to_run(
@@ -289,7 +300,9 @@ class AzureAgentClient:
                     if tc.function.name == "handoff_to_agent":
                         try:
                             handoff_target = json.loads(tc.function.arguments).get("target_role")
-                        except (json.JSONDecodeError, KeyError):
+                            logger.info("send_message: Handoff detected to role=%s", handoff_target)
+                        except (json.JSONDecodeError, KeyError) as exc:
+                            logger.warning("send_message: Failed to parse handoff arguments: %s", exc)
                             pass
                         break
 
@@ -302,6 +315,7 @@ class AzureAgentClient:
                         run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
 
                     new_agent_id = self.get_agent_id(handoff_target)
+                    logger.info("send_message: Processing handoff with new_agent_id=%s", new_agent_id)
                     self.client.agents.create_message(
                         thread_id=thread_id,
                         role="user",
@@ -321,6 +335,7 @@ class AzureAgentClient:
                         max_completion_tokens=10000,
                         truncation_strategy={"type": "last_messages", "last_messages": 10},
                     )
+                    logger.info("send_message: Handoff run created: run_id=%s", run.id)
                     role = handoff_target
                     start_time = time.time()  # reset for new run
 
@@ -328,12 +343,56 @@ class AzureAgentClient:
                 break
 
         # Retrieve the latest assistant message using the SDK helper
-        messages = self.client.agents.list_messages(thread_id=thread_id)
-        text_content = messages.get_last_text_message_by_role(MessageRole.AGENT)
-        content = text_content.text.value if text_content else ""
+        try:
+            messages = self.client.agents.list_messages(thread_id=thread_id)
+            text_content = messages.get_last_text_message_by_role(MessageRole.AGENT)
+            
+            if text_content is None:
+                logger.warning(
+                    "No text message found for agent in thread %s. "
+                    "Attempting fallback: listing all messages...", thread_id
+                )
+                # Fallback: try to get any message content
+                all_messages = list(messages)
+                content = ""
+                if all_messages:
+                    for msg in reversed(all_messages):  # Start from most recent
+                        if hasattr(msg, 'content') and msg.content:
+                            for block in msg.content:
+                                if hasattr(block, 'text') and hasattr(block.text, 'value'):
+                                    content = block.text.value
+                                    break
+                        if content:
+                            break
+                if not content:
+                    logger.error(
+                        "Unable to extract any message content from thread %s. "
+                        "Run status=%s", thread_id, run.status
+                    )
+                    content = "I apologize, but I was unable to generate a response."
+            else:
+                # Primary path: text_content was found
+                if hasattr(text_content, 'text') and hasattr(text_content.text, 'value'):
+                    content = text_content.text.value
+                else:
+                    logger.warning(
+                        "text_content found but structure unexpected for thread %s. "
+                        "text_content type: %s", thread_id, type(text_content)
+                    )
+                    content = "I apologize, but I was unable to generate a response."
+                    
+        except Exception as exc:
+            logger.exception("Error retrieving agent message from thread %s: %s", thread_id, exc)
+            content = "I apologize, but an error occurred while processing your request."
+
+        final_content = content or "I apologize, but I was unable to generate a response."
+        logger.info(
+            "send_message: Completed for thread=%s, role=%s, run_status=%s, content_len=%d",
+            thread_id, role, run.status, len(final_content)
+        )
 
         return {
-            "content": content or "No response",
+            "content": final_content,
             "run_status": run.status,
             "agent_role": role,
         }
