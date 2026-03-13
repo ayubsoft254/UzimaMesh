@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.exceptions import SuspiciousOperation
 
 from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import MessageRole
 from azure.core.exceptions import ServiceResponseTimeoutError
 from azure.identity import DefaultAzureCredential
 
@@ -46,22 +47,28 @@ class AzureAgentClient:
             "default":      single_agent_id,
         }
 
-        if not all([endpoint, self.agents["intake"]]):
+        if not all([(endpoint or settings.AZURE_AI_PROJECT_CONNECTION_STRING), self.agents["intake"]]):
             raise ValueError(
                 "Missing Azure AI configuration. "
-                "Check AZURE_AI_ENDPOINT and Agent IDs in .env"
+                "Check AZURE_AI_ENDPOINT (or AZURE_AI_PROJECT_CONNECTION_STRING) and Agent IDs in .env"
             )
 
+        # Prefer the full connection string if provided (e.g. from Azure AI Foundry),
+        # otherwise build it from individual environment variables.
+        conn_str = settings.AZURE_AI_PROJECT_CONNECTION_STRING or (
+            f"{endpoint.replace('https://', '').rstrip('/')};{sub_id};{rg_name};{project_name}"
+        )
 
-
-        # Build connection string for AIProjectClient
-        host = endpoint.replace("https://", "").rstrip("/")
-        conn_str = f"{host};{sub_id};{rg_name};{project_name}"
-
-        # We pass exclude_environment_credential=True so Azure App Service uses
-        # System-Assigned Managed Identity, rather than any injected Client ID App Settings
+        # Use system-assigned Managed Identity on Azure App Service.
+        # managed_identity_client_id=None overrides the AZURE_CLIENT_ID environment variable
+        # (which is set for social/OAuth auth) so that DefaultAzureCredential does NOT
+        # treat it as a user-assigned MI client ID – avoiding the 400 "No User Assigned
+        # Managed Identity found" error seen in the logs.
         self.client = AIProjectClient.from_connection_string(
-            credential=DefaultAzureCredential(exclude_environment_credential=True),
+            credential=DefaultAzureCredential(
+                exclude_environment_credential=True,
+                managed_identity_client_id=None,
+            ),
             conn_str=conn_str,
             connection_timeout=30,
             read_timeout=90,
@@ -227,7 +234,7 @@ class AzureAgentClient:
 
         run = self.client.agents.create_run(
             thread_id=thread_id,
-            assistant_id=agent_id,
+            agent_id=agent_id,
             additional_instructions=additional_instructions,
             max_completion_tokens=10000,
             truncation_strategy={"type": "last_messages", "last_messages": 10},
@@ -305,7 +312,7 @@ class AzureAgentClient:
                     )
                     run = self.client.agents.create_run(
                         thread_id=thread_id,
-                        assistant_id=new_agent_id,
+                        agent_id=new_agent_id,
                         additional_instructions=(
                             "You ARE talking to the user. THEY ARE ALREADY LOGGED IN. "
                             "Do NOT greet the user, they have been transferred to you. "
@@ -320,21 +327,10 @@ class AzureAgentClient:
             else:
                 break
 
-        # Retrieve the latest assistant message
+        # Retrieve the latest assistant message using the SDK helper
         messages = self.client.agents.list_messages(thread_id=thread_id)
-        content = ""
-        for msg in messages.data:
-            if msg.role == "assistant":
-                for block in getattr(msg, "content", []):
-                    if hasattr(block, 'text') and hasattr(block.text, 'value'):
-                        content += block.text.value
-                    elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
-                        content += block.text.value if hasattr(block.text, 'value') else getattr(block.text, 'value', str(block.text))
-                    elif isinstance(block, dict):
-                        text_val = block.get('text', {}).get('value', '') if isinstance(block.get('text'), dict) else block.get('text', '')
-                        if text_val:
-                            content += text_val
-                break
+        text_content = messages.get_last_text_message_by_role(MessageRole.AGENT)
+        content = text_content.text.value if text_content else ""
 
         return {
             "content": content or "No response",
@@ -477,7 +473,7 @@ class AzureAgentClient:
                                                 )
                                                 with self.client.agents.create_stream(
                                                     thread_id=thread_id,
-                                                    assistant_id=new_agent_id,
+                                                    agent_id=new_agent_id,
                                                     additional_instructions=(
                                                         "You ARE talking to the user. "
                                                         "THEY ARE ALREADY LOGGED IN. "
@@ -499,7 +495,7 @@ class AzureAgentClient:
 
                 with self.client.agents.create_stream(
                     thread_id=thread_id,
-                    assistant_id=agent_id,
+                    agent_id=agent_id,
                     additional_instructions=additional_instructions,
                     max_completion_tokens=10000,
                     truncation_strategy={"type": "last_messages", "last_messages": 10},
