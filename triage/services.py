@@ -71,8 +71,17 @@ class AzureAgentClient:
 
     def create_thread(self) -> str:
         """Create a new agent thread and return its ID."""
-        thread = self.client.agents.create_thread()
-        return thread.id
+        from azure.core.exceptions import ServiceResponseTimeoutError
+        for attempt in range(3):
+            try:
+                thread = self.client.agents.create_thread()
+                return thread.id
+            except ServiceResponseTimeoutError as exc:
+                if attempt == 2:
+                    logger.error("Failed to create thread after 3 attempts due to timeout")
+                    raise
+                logger.warning("Timeout creating thread, retrying... (attempt %d/3)", attempt + 1)
+                time.sleep(1)
 
     def get_agent_id(self, role: str = "intake") -> str | None:
         """Return the agent ID for *role*, falling back to 'default'."""
