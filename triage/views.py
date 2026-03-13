@@ -455,6 +455,7 @@ def api_chat_stream(request):
                     yield json.dumps({"type": "error", "content": f"Retry failed: {str(retry_e)}"}) + "\n\n"
                 response = StreamingHttpResponse(_err(), content_type='text/event-stream')
                 response['X-Accel-Buffering'] = 'no'
+                response['Cache-Control'] = 'no-cache'
                 return response
         else:
             logger.exception("Error occurred connecting stream to the AI Agent")
@@ -462,6 +463,7 @@ def api_chat_stream(request):
                 yield json.dumps({"type": "error", "content": f"Error: {error_str}"}) + "\n\n"
             response = StreamingHttpResponse(_err(), content_type='text/event-stream')
             response['X-Accel-Buffering'] = 'no'
+            response['Cache-Control'] = 'no-cache'
             return response
 
 
