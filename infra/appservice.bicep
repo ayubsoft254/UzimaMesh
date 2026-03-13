@@ -2,7 +2,7 @@ param name string
 param location string
 param databaseUrl string
 param aiFoundryEndpoint string
-param instanceCount int = 2
+param instanceCount int = 1
 
 resource appPlan 'Microsoft.Web/serverfarms@2022-03-01' = {
   name: '${name}-plan'
@@ -42,6 +42,8 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
         // Set to 'true' only on first deploy or when you want to reset seed data
         { name: 'SEED_ON_STARTUP', value: 'false' }
+        { name: 'WEBSITES_CONTAINER_START_TIME_LIMIT', value: '1800' }
+        { name: 'WEBSITE_SWAP_WARMUP_PING_STATUSES', value: '200' }
       ]
     }
   }

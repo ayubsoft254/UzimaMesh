@@ -51,13 +51,16 @@ else
     echo "Skipping seed data (set SEED_ON_STARTUP=true to enable)."
 fi
 
-# ─── 4. Start Gunicorn with ASGI worker ─────────────────────────────────────
+# # ─── 4. Start Gunicorn with ASGI worker ─────────────────────────────────────
 echo "Starting Gunicorn (ASGI)..."
 exec gunicorn \
     --bind=0.0.0.0:8000 \
-    --timeout=600 \
+    --timeout=0 \
+    --keepalive=75 \
     --workers=2 \
     --worker-class=uvicorn.workers.UvicornWorker \
+    --worker-connections=1000 \
     --access-logfile=- \
     --error-logfile=- \
+    --log-level=info \
     uzima_mesh.asgi:application
