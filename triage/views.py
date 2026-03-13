@@ -425,13 +425,22 @@ def api_chat_stream(request):
 
         return _async_gen()
 
+    def _make_sse_response(gen, sess=None):
+        response = StreamingHttpResponse(
+            _make_async_stream(gen, sess),
+            content_type='text/event-stream'
+        )
+        response['X-Accel-Buffering'] = 'no'
+        response['Cache-Control'] = 'no-cache'
+        return response
+
     # Log user message immediately
     try:
         if session:
             ChatMessage.objects.create(session=session, role='patient', content=user_message)
 
         generator = send_message_stream(thread_id, context_msg, role=role, user_data=user_data)
-        return StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
+        return _make_sse_response(generator, session)
 
     except Exception as e:
         error_str = str(e)
@@ -442,17 +451,17 @@ def api_chat_stream(request):
                 new_thread_id = create_thread()
                 request.session['triage_thread_id'] = new_thread_id
                 generator = send_message_stream(new_thread_id, context_msg, role="intake", user_data=user_data)
-                return StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
+                return _make_sse_response(generator, session)
             except Exception as retry_e:
                 logger.exception("Failed to retry sending message stream to Azure Agent")
-                async def _err():
+                def _err():
                     yield json.dumps({"type": "error", "content": f"Retry failed: {str(retry_e)}"}) + "\n\n"
-                return StreamingHttpResponse(_err(), content_type='text/event-stream')
+                return _make_sse_response(_err())
         else:
             logger.exception("Error occurred connecting stream to the AI Agent")
-            async def _err():
+            def _err():
                 yield json.dumps({"type": "error", "content": f"Error: {error_str}"}) + "\n\n"
-            return StreamingHttpResponse(_err(), content_type='text/event-stream')
+            return _make_sse_response(_err())
 
 
 # ──────────────────────────────────────────────
