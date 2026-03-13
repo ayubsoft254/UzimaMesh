@@ -431,7 +431,10 @@ def api_chat_stream(request):
             ChatMessage.objects.create(session=session, role='patient', content=user_message)
 
         generator = send_message_stream(thread_id, context_msg, role=role, user_data=user_data)
-        return StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
+        response = StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
+        response['X-Accel-Buffering'] = 'no'
+        response['Cache-Control'] = 'no-cache'
+        return response
 
     except Exception as e:
         error_str = str(e)
@@ -442,17 +445,24 @@ def api_chat_stream(request):
                 new_thread_id = create_thread()
                 request.session['triage_thread_id'] = new_thread_id
                 generator = send_message_stream(new_thread_id, context_msg, role="intake", user_data=user_data)
-                return StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
+                response = StreamingHttpResponse(_make_async_stream(generator, session), content_type='text/event-stream')
+                response['X-Accel-Buffering'] = 'no'
+                response['Cache-Control'] = 'no-cache'
+                return response
             except Exception as retry_e:
                 logger.exception("Failed to retry sending message stream to Azure Agent")
                 async def _err():
                     yield json.dumps({"type": "error", "content": f"Retry failed: {str(retry_e)}"}) + "\n\n"
-                return StreamingHttpResponse(_err(), content_type='text/event-stream')
+                response = StreamingHttpResponse(_err(), content_type='text/event-stream')
+                response['X-Accel-Buffering'] = 'no'
+                return response
         else:
             logger.exception("Error occurred connecting stream to the AI Agent")
             async def _err():
                 yield json.dumps({"type": "error", "content": f"Error: {error_str}"}) + "\n\n"
-            return StreamingHttpResponse(_err(), content_type='text/event-stream')
+            response = StreamingHttpResponse(_err(), content_type='text/event-stream')
+            response['X-Accel-Buffering'] = 'no'
+            return response
 
 
 # ──────────────────────────────────────────────
