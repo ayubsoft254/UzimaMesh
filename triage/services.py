@@ -27,6 +27,20 @@ _client_lock = threading.Lock()
 # Azure Agent Client
 # ---------------------------------------------------------------------------
 
+def process_stream(current_stream, depth: int = 0):
+    if depth > 3:
+        return
+
+    run_id = None
+    tool_calls_seen = []
+
+    for event_item in current_stream:
+        # ADD THIS LINE:
+        logger.info("STREAM EVENT: type=%s, data_type=%s",
+            getattr(event_item, "event", getattr(event_item, "type", "UNKNOWN")),
+            type(getattr(event_item, "data", event_item)).__name__
+        )        
+
 class AzureAgentClient:
     """Call Azure AI agents using the official SDK, supporting multiple roles."""
 
