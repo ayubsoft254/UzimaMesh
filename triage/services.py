@@ -66,9 +66,7 @@ class AzureAgentClient:
                 "Check AZURE_AI_ENDPOINT (or AZURE_AI_PROJECT_CONNECTION_STRING) and Agent IDs in .env"
             )
 
-        conn_str = settings.AZURE_AI_PROJECT_CONNECTION_STRING or (
-            f"{endpoint.replace('https://', '').rstrip('/')};{sub_id};{rg_name};{project_name}"
-        )
+        conn_str = self._build_connection_string(endpoint)
 
         self.client = AIProjectClient.from_connection_string(
             credential=DefaultAzureCredential(
