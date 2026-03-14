@@ -63,7 +63,7 @@ exec gunicorn \
     --bind=0.0.0.0:8000 \
     --timeout=0 \
     --keep-alive=75 \
-    --workers=2 \
+    --workers="${GUNICORN_WORKERS}" \
     --worker-class=uvicorn.workers.UvicornWorker \
     --worker-connections=1000 \
     --access-logfile=- \
