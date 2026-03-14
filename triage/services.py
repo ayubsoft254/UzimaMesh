@@ -31,9 +31,6 @@ class AzureAgentClient:
 
     def __init__(self) -> None:
         endpoint = settings.AZURE_AI_ENDPOINT
-        sub_id = os.getenv("AZURE_SUBSCRIPTION_ID")
-        rg_name = os.getenv("AZURE_RESOURCE_GROUP", "rg-uzima-mesh")
-        project_name = os.getenv("AZURE_AI_PROJECT_NAME", "ai-uzima-mesh-project")
 
         # Agent ID mapping (using a single agent for all roles for now)
         single_agent_id = os.getenv("AZURE_AI_INTAKE_AGENT_ID") or os.getenv("AZURE_AI_AGENT_ID")
@@ -52,16 +49,9 @@ class AzureAgentClient:
                 "Check AZURE_AI_ENDPOINT and Agent IDs in .env"
             )
 
-
-
-        # Build connection string for AIProjectClient
-        host = endpoint.replace("https://", "").rstrip("/")
-        conn_str = f"{host};{sub_id};{rg_name};{project_name}"
-
-        # We pass exclude_environment_credential=True so Azure App Service uses
-        # System-Assigned Managed Identity, rather than any injected Client ID App Settings
+        conn_str = self._build_connection_string(endpoint)
         self.client = AIProjectClient.from_connection_string(
-            credential=DefaultAzureCredential(exclude_environment_credential=True),
+            credential=DefaultAzureCredential(),
             conn_str=conn_str,
             connection_timeout=30,
             read_timeout=90,
@@ -70,6 +60,33 @@ class AzureAgentClient:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_connection_string(endpoint: str) -> str:
+        explicit_conn_str = settings.AZURE_AI_PROJECT_CONNECTION_STRING.strip()
+        if explicit_conn_str:
+            return explicit_conn_str
+
+        sub_id = os.getenv("AZURE_SUBSCRIPTION_ID")
+        rg_name = os.getenv("AZURE_RESOURCE_GROUP")
+        project_name = os.getenv("AZURE_AI_PROJECT_NAME")
+        missing = [
+            name
+            for name, value in (
+                ("AZURE_SUBSCRIPTION_ID", sub_id),
+                ("AZURE_RESOURCE_GROUP", rg_name),
+                ("AZURE_AI_PROJECT_NAME", project_name),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                "Missing Azure AI project configuration. Set AZURE_AI_PROJECT_CONNECTION_STRING "
+                f"or provide {', '.join(missing)}."
+            )
+
+        host = endpoint.replace("https://", "").rstrip("/")
+        return f"{host};{sub_id};{rg_name};{project_name}"
 
     def create_thread(self) -> str:
         """Create a new agent thread and return its ID."""
