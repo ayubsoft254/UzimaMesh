@@ -53,6 +53,12 @@ fi
 
 # ─── 4. Start Gunicorn with ASGI worker ─────────────────────────────────────
 echo "Starting Gunicorn (ASGI)..."
+# MCP over SSE stores active session writers in-process. If multiple Gunicorn
+# workers are used, the SSE handshake may hit one worker while /mcp/messages
+# lands on another worker, causing MCP tool POSTs to return 404.
+# Keep a single worker by default unless you provide an MCP-aware routing strategy.
+GUNICORN_WORKERS="${GUNICORN_WORKERS:-1}"
+
 exec gunicorn \
     --bind=0.0.0.0:8000 \
     --timeout=0 \

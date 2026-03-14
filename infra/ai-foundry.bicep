@@ -26,3 +26,4 @@ resource aiProject 'Microsoft.MachineLearningServices/workspaces@2024-04-01-prev
 }
 
 output endpoint string = aiProject.properties.discoveryUrl
+output projectName string = aiProject.name

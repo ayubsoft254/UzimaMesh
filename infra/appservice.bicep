@@ -2,6 +2,7 @@ param name string
 param location string
 param databaseUrl string
 param aiFoundryEndpoint string
+param aiProjectName string
 param instanceCount int = 1
 
 resource appPlan 'Microsoft.Web/serverfarms@2022-03-01' = {
@@ -38,7 +39,11 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
         { name: 'ALLOWED_HOSTS', value: 'localhost,127.0.0.1,${name}.azurewebsites.net,169.254.129.1,169.254.129.2,169.254.129.3,169.254.129.4,169.254.129.5,169.254.129.6' }
         { name: 'CSRF_TRUSTED_ORIGINS', value: 'https://${name}.azurewebsites.net' }
         { name: 'DATABASE_URL', value: databaseUrl }
+        { name: 'AZURE_AI_ENDPOINT', value: aiFoundryEndpoint }
         { name: 'AZURE_AI_FOUNDRY_ENDPOINT', value: aiFoundryEndpoint }
+        { name: 'AZURE_AI_PROJECT_NAME', value: aiProjectName }
+        { name: 'AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
+        { name: 'AZURE_RESOURCE_GROUP', value: resourceGroup().name }
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
         // Set to 'true' only on first deploy or when you want to reset seed data
         { name: 'SEED_ON_STARTUP', value: 'false' }
