@@ -35,7 +35,7 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
       detailedErrorLoggingEnabled: true
       appSettings: [
         { name: 'DJANGO_DEBUG', value: 'False' }
-        { name: 'ALLOWED_HOSTS', value: 'localhost,127.0.0.1,${name}.azurewebsites.net' }
+        { name: 'ALLOWED_HOSTS', value: 'localhost,127.0.0.1,${name}.azurewebsites.net,169.254.129.1,169.254.129.2,169.254.129.3,169.254.129.4,169.254.129.5,169.254.129.6' }
         { name: 'CSRF_TRUSTED_ORIGINS', value: 'https://${name}.azurewebsites.net' }
         { name: 'DATABASE_URL', value: databaseUrl }
         { name: 'AZURE_AI_FOUNDRY_ENDPOINT', value: aiFoundryEndpoint }
