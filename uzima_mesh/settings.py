@@ -35,7 +35,7 @@ CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if os.ge
 # Azure App Service internal health probe IPs (link-local addresses).
 # Without these, Django rejects the health probe, preventing the instance
 # from being marked as healthy and causing container restart loops.
-ALLOWED_HOSTS += ['169.254.129.1', '169.254.129.2', '169.254.129.5', '169.254.129.6']
+ALLOWED_HOSTS += ["169.254.0.0/16"]
 
 
 # Application definition
@@ -202,13 +202,10 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 # Azure AI Agent Configuration
-# Method 1: API Key Authentication (Recommended - no role assignments needed)
-AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT")  # e.g., https://xxxxx.api.azureml.ms
-AZURE_AI_API_KEY = os.getenv("AZURE_AI_API_KEY")
+AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT") or os.getenv("AZURE_AI_FOUNDRY_ENDPOINT")
 AZURE_AI_AGENT_ID = os.getenv("AZURE_AI_AGENT_ID")
-
-# Method 2: Connection String Authentication (Managed Identity - requires role assignment)
 AZURE_AI_PROJECT_CONNECTION_STRING = os.getenv("AZURE_AI_PROJECT_CONNECTION_STRING", "")
+AZURE_AI_MANAGED_IDENTITY_CLIENT_ID = os.getenv("AZURE_AI_MANAGED_IDENTITY_CLIENT_ID", "")
 
 # REST Framework settings
 REST_FRAMEWORK = {
