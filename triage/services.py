@@ -6,6 +6,7 @@ import threading
 import asyncio
 import concurrent.futures
 import inspect
+from urllib.parse import urlparse
 from typing import Dict, Any, Generator
 
 from django.conf import settings
@@ -108,7 +109,11 @@ class AzureAgentClient:
                 f"or provide {', '.join(missing)}."
             )
 
-        host = endpoint.replace("https://", "").rstrip("/")
+        parsed = urlparse(endpoint)
+        # discoveryUrl can include a path; connection string requires host only.
+        host = (parsed.netloc or parsed.path).replace("https://", "").rstrip("/")
+        if "/" in host:
+            host = host.split("/", 1)[0]
         return f"{host};{sub_id};{rg_name};{project_name}"
 
     def create_thread(self) -> str:
