@@ -33,9 +33,10 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',') if os.getenv('ALLOWED_
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if os.getenv('CSRF_TRUSTED_ORIGINS') else []
 
 # Azure App Service internal health probe IPs (link-local addresses).
-# Without these, Django rejects the health probe, preventing the instance
-# from being marked as healthy and causing container restart loops.
-ALLOWED_HOSTS += ["169.254.0.0/16"]
+# The probe uses a 169.254.x.x IP as the Host header (last octets change).
+# AllowHealthProbeMiddleware rewrites those to 127.0.0.1 before host
+# validation, so we only need to allow 127.0.0.1 here.
+ALLOWED_HOSTS += ["127.0.0.1"]
 
 
 # Application definition
@@ -65,6 +66,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'uzima_mesh.middleware.AllowHealthProbeMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
