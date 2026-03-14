@@ -35,7 +35,7 @@ CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if os.ge
 # Azure App Service internal health probe IPs (link-local addresses).
 # Without these, Django rejects the health probe, preventing the instance
 # from being marked as healthy and causing container restart loops.
-ALLOWED_HOSTS += ['169.254.129.1', '169.254.129.2', '169.254.129.5', '169.254.129.6']
+ALLOWED_HOSTS += ['169.254.129.1', '169.254.129.2', '169.254.129.3', '169.254.129.4', '169.254.129.5', '169.254.129.6', '169.254.129.7', '169.254.129.8', '169.254.129.9']
 
 
 # Application definition
