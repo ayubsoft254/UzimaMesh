@@ -108,6 +108,21 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _is_stale_thread_error(error_text: str) -> bool:
+    """Return True only for thread-lifecycle errors that can be fixed by creating a new thread."""
+    lowered = (error_text or "").lower()
+    stale_markers = [
+        "no thread found",
+        "no thread found with id",
+        "thread not found",
+        "thread is active",
+        "already has an active run",
+        "cannot add messages to thread",
+        "(none)",
+    ]
+    return any(marker in lowered for marker in stale_markers)
+
+
 def _update_rolling_summary(session_id, thread_id):
     """Fetch a concise AI summary and persist it on the TriageSession.
 
@@ -276,7 +291,7 @@ def api_chat(request):
                 
     except Exception as e:
         error_str = str(e)
-        if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower() or "active" in error_str.lower():
+        if _is_stale_thread_error(error_str):
             try:
                 logger.warning("Stale or locked thread detected. Creating a new thread session...")
                 new_thread_id = create_thread()
@@ -463,9 +478,7 @@ async def api_chat_stream(request):
 
     except Exception as e:
         error_str = str(e)
-        stale_thread = any(
-            key in error_str.lower() for key in ["no thread found", "not found", "(none)", "active"]
-        )
+        stale_thread = _is_stale_thread_error(error_str)
         if stale_thread:
             try:
                 logger.warning("Stale/locked thread detected. Creating a new thread.")

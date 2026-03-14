@@ -13,7 +13,7 @@ from django.core.exceptions import SuspiciousOperation
 
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import MessageRole
-from azure.core.exceptions import ServiceResponseTimeoutError
+from azure.core.exceptions import ResourceNotFoundError, ServiceResponseTimeoutError
 from azure.identity import DefaultAzureCredential
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,17 @@ class AzureAgentClient:
             try:
                 thread = self.client.agents.create_thread()
                 return thread.id
+            except ResourceNotFoundError as exc:
+                logger.error(
+                    "Azure AI project resource not found while creating thread. "
+                    "Check endpoint/connection string and project identifiers.",
+                    exc_info=exc,
+                )
+                raise RuntimeError(
+                    "Azure AI project not found. Verify AZURE_AI_PROJECT_CONNECTION_STRING "
+                    "or AZURE_AI_ENDPOINT + AZURE_SUBSCRIPTION_ID + "
+                    "AZURE_RESOURCE_GROUP + AZURE_AI_PROJECT_NAME."
+                ) from exc
             except ServiceResponseTimeoutError as exc:
                 if attempt == 2:
                     raise
@@ -501,6 +512,24 @@ class AzureAgentClient:
                         ),
                     }) + "\n\n"
                 return _timeout_gen()
+
+            elif isinstance(exc, ResourceNotFoundError):
+                logger.error(
+                    "Azure AI resource not found during create_message on thread %s",
+                    thread_id,
+                    exc_info=exc,
+                )
+
+                def _resource_not_found_gen():
+                    yield json.dumps({
+                        "type": "error",
+                        "content": (
+                            "Azure AI project was not found. Please check service configuration "
+                            "(endpoint/connection string, subscription, resource group, and project name)."
+                        ),
+                    }) + "\n\n"
+
+                return _resource_not_found_gen()
 
             elif isinstance(exc, SuspiciousOperation):
                 logger.error("Disallowed host blocked during stream setup: %s", exc)
