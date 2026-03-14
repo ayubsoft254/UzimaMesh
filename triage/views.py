@@ -314,11 +314,10 @@ def _get_session_by_thread(thread_id):
 
 def _get_user_data(user):
     """
-    Sync helper: resolve user + patient profile into a plain dict.
-    Must be called via sync_to_async because it touches the ORM/lazy objects.
+    Sync helper: resolve a concrete auth user + patient profile into a plain dict.
+    Must be called via sync_to_async because it touches the ORM.
     Returns (is_authenticated, user_data_dict_or_None).
     """
-    # Force evaluation of the lazy user object inside a sync context
     if not user.is_authenticated:
         return False, None
 
@@ -359,12 +358,8 @@ async def api_chat_stream(request):
     if not user_message or not thread_id:
         return JsonResponse({'error': 'Missing message or thread_id'}, status=400)
 
-    # ── FIX 1 & 2: Resolve user + patient data safely in a sync thread ──
-    # request.user is a SimpleLazyObject that hits the DB on first access.
-    # Calling it directly in async context causes SynchronousOnlyOperation.
-    is_authenticated, user_data = await sync_to_async(_get_user_data)(request.user)
-
-    # ── FIX 3: ORM query correctly wrapped as a callable lambda ──
+    user = await request.auser()
+    is_authenticated, user_data = await sync_to_async(_get_user_data)(user)
     session = await sync_to_async(_get_session_by_thread)(thread_id)
 
     role = "intake"
@@ -372,7 +367,6 @@ async def api_chat_stream(request):
     if session:
         role = session.active_agent_role
         session_id = session.id
-        # Attach rolling summary if available
         if is_authenticated and user_data and session.ai_summary:
             user_data['rolling_summary'] = session.ai_summary
 
@@ -380,50 +374,40 @@ async def api_chat_stream(request):
 
     async def _async_stream(sync_gen, sess):
         """
-        Consume a sync generator safely by running it entirely on one background
-        thread and piping chunks through a queue.
-
-        The Azure SDK's create_stream() uses a `with` context manager that must
-        stay open for the lifetime of the generator. Calling next() repeatedly
-        via run_in_executor() is unsafe because each call may use a different
-        thread, breaking the context manager's internal state and causing the
-        stream to appear empty. Running the whole generator on ONE thread avoids
-        this entirely.
+        Consume a sync generator on one worker thread and yield SSE chunks
+        without blocking the event loop.
         """
         import queue as queue_module
 
         chunk_queue = queue_module.Queue()
-        _DONE = object()
-        _ERROR = object()
+        done_marker = object()
+        error_marker = object()
 
         def _drain_generator():
-            """Run entirely on a single background thread."""
             try:
                 for chunk in sync_gen:
                     chunk_queue.put(chunk)
             except Exception as exc:
-                chunk_queue.put((_ERROR, exc))
+                chunk_queue.put((error_marker, exc))
             finally:
-                chunk_queue.put(_DONE)
+                chunk_queue.put(done_marker)
 
         loop = asyncio.get_running_loop()
-        # Submit the drainer to the executor — it runs start-to-finish on one thread
         drain_future = loop.run_in_executor(None, _drain_generator)
 
         full_content = ""
 
         while True:
-            # Poll the queue without blocking the event loop
             try:
                 item = chunk_queue.get_nowait()
             except queue_module.Empty:
                 await asyncio.sleep(0.01)
                 continue
 
-            if item is _DONE:
+            if item is done_marker:
                 break
 
-            if isinstance(item, tuple) and len(item) == 2 and item[0] is _ERROR:
+            if isinstance(item, tuple) and len(item) == 2 and item[0] is error_marker:
                 _, exc = item
                 logger.exception("Error reading stream chunk: %s", exc)
                 yield json.dumps({"type": "error", "content": str(exc)}) + "\n\n"
@@ -439,10 +423,8 @@ async def api_chat_stream(request):
 
             yield chunk
 
-        # Ensure the background thread finishes cleanly
         await drain_future
 
-        # Persist full agent response and trigger summary if needed
         if sess and full_content:
             try:
                 await sync_to_async(ChatMessage.objects.create)(
@@ -468,10 +450,8 @@ async def api_chat_stream(request):
         return response
 
     def _single_error_event(message):
-        """Yield one SSE-formatted error event from a sync generator."""
         yield json.dumps({"type": "error", "content": message}) + "\n\n"
 
-    # Log user message immediately
     try:
         if session:
             await sync_to_async(ChatMessage.objects.create)(
@@ -484,18 +464,15 @@ async def api_chat_stream(request):
     except Exception as e:
         error_str = str(e)
         stale_thread = any(
-            k in error_str.lower() for k in ["no thread found", "not found", "(none)", "active"]
+            key in error_str.lower() for key in ["no thread found", "not found", "(none)", "active"]
         )
         if stale_thread:
             try:
                 logger.warning("Stale/locked thread detected. Creating a new thread.")
                 new_thread_id = await asyncio.to_thread(create_thread)
-
-                # ── FIX 5: Session write must happen in sync context ──
                 await sync_to_async(_set_session_key)(
                     request.session, 'triage_thread_id', new_thread_id
                 )
-
                 generator = send_message_stream(
                     new_thread_id, context_msg, role="intake", user_data=user_data
                 )
@@ -505,11 +482,11 @@ async def api_chat_stream(request):
                 return _make_sse_response(
                     _single_error_event(f"Retry failed: {str(retry_e)}"), session
                 )
-        else:
-            logger.exception("Error occurred connecting stream to the AI Agent")
-            return _make_sse_response(
-                _single_error_event(f"Error: {error_str}"), session
-            )
+
+        logger.exception("Error occurred connecting stream to the AI Agent")
+        return _make_sse_response(
+            _single_error_event(f"Error: {error_str}"), session
+        )
 
 
 # ──────────────────────────────────────────────
