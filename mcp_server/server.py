@@ -142,7 +142,6 @@ async def consult_agent(thread_id: str, query: str, target_role: str):
         return {"status": "error", "message": "Cannot consult the intake agent."}
 
     try:
-        print(f"--- Consult: {target_role} with query '{query}' ---")
         # Use a fresh thread for consultation to avoid locking the main triage thread
         consult_thread_id = await sync_to_async(create_thread)()
         response = await sync_to_async(send_message)(consult_thread_id, query, role=target_role)

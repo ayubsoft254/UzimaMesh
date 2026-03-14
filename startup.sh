@@ -51,7 +51,7 @@ else
     echo "Skipping seed data (set SEED_ON_STARTUP=true to enable)."
 fi
 
-# # ─── 4. Start Gunicorn with ASGI worker ─────────────────────────────────────
+# ─── 4. Start Gunicorn with ASGI worker ─────────────────────────────────────
 echo "Starting Gunicorn (ASGI)..."
 # MCP over SSE stores active session writers in-process. If multiple Gunicorn
 # workers are used, the SSE handshake may hit one worker while /mcp/messages
@@ -63,7 +63,7 @@ exec gunicorn \
     --bind=0.0.0.0:8000 \
     --timeout=0 \
     --keep-alive=75 \
-    --workers="${GUNICORN_WORKERS}" \
+    --workers=2 \
     --worker-class=uvicorn.workers.UvicornWorker \
     --worker-connections=1000 \
     --access-logfile=- \

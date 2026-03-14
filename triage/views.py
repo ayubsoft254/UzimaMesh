@@ -161,13 +161,10 @@ def patient_intake(request):
                         latest_session.save()
                         request.session['triage_thread_id'] = thread_id
                     except Exception as e:
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.exception("Failed to create thread during session recovery")
-                        thread_id = None  # Force recreation below
+                        thread_id = None
                         latest_session.thread_id = None
                         latest_session.save()
-                        # Clear it from the session too
                         if 'triage_thread_id' in request.session:
                             del request.session['triage_thread_id']
     
@@ -186,11 +183,7 @@ def patient_intake(request):
         try:
             thread_id = create_thread()
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.exception("Failed to create thread during patient intake")
-            # If it fails, do not use 'local_mock_thread' as it crashes API requests.
-            # Instead, let the template handle no thread context or return an error state.
             thread_id = None
             
         if thread_id:
@@ -200,7 +193,6 @@ def patient_intake(request):
         if request.user.is_authenticated:
             patient = getattr(request.user, 'patient_profile', None)
             if patient and thread_id:
-                # Use get_or_create to avoid duplicates if user refreshes before chat starts
                 TriageSession.objects.get_or_create(
                     patient=patient,
                     status='PENDING',
@@ -240,30 +232,24 @@ def api_chat(request):
 
     # 2. Forward message to Azure Agent with current role and session context
     try:
-        # Prepend session info so tools like handoff_to_agent have the ID
         context_msg = f"[Context: session_id={session_id}]\n{user_message}" if session_id else user_message
         
-        # Strategy: Personalization - Fetch patient data
         user_data = None
         if request.user.is_authenticated:
             patient = getattr(request.user, 'patient_profile', None)
             if patient:
                 user_data = {
-                    # Read from Patient model fields first (populated at signup)
                     'first_name': patient.first_name or request.user.first_name,
                     'last_name': patient.last_name or request.user.last_name,
                     'email': patient.email or request.user.email
                 }
             else:
-                # Fallback to User model
                 user_data = {
                     'first_name': request.user.first_name,
                     'last_name': request.user.last_name,
                     'email': request.user.email
                 }
             
-            # Inject the rolling AI summary to maintain diagnostic context
-            # while truncating raw history messages.
             if session and session.ai_summary:
                 user_data['rolling_summary'] = session.ai_summary
         
@@ -271,23 +257,18 @@ def api_chat(request):
         ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
         run_status = response_data.get('run_status', 'failed')
 
-        # 3. Log messages to database for persistence
         if session:
             ChatMessage.objects.create(session=session, role='patient', content=user_message)
             ChatMessage.objects.create(session=session, role='agent', content=ai_response_text)
                 
-        # 4. Check if the role changed during the run (via tool call)
         if session:
             session.refresh_from_db()
             new_role = session.active_agent_role
             if new_role != role:
                 role = new_role
                 
-        # 5. Trigger automatic rolling summary if message count is a multiple of 5
         if session:
             msg_count = ChatMessage.objects.filter(session=session).count()
-            # We trigger a background summarize every 5 messages to ensure truncation
-            # (which removes the last 10) never loses context.
             if msg_count > 0 and msg_count % 5 == 0:
                 threading.Thread(
                     target=_update_rolling_summary, args=(session.id, thread_id), daemon=True
@@ -295,35 +276,23 @@ def api_chat(request):
                 
     except Exception as e:
         error_str = str(e)
-        # Handle expired/invalid threads by automatically creating a new one
         if "no thread found with id" in error_str.lower() or "not found" in error_str.lower() or "(none)" in error_str.lower() or "active" in error_str.lower():
             try:
-                print("Stale or locked thread detected. Creating a new thread session...")
+                logger.warning("Stale or locked thread detected. Creating a new thread session...")
                 new_thread_id = create_thread()
                 request.session['triage_thread_id'] = new_thread_id
                 
-                # Retry sending the message with the new thread ID
                 response_data = send_message(new_thread_id, context_msg, role="intake", user_data=user_data)
                 ai_response_text = response_data.get('content', "I'm sorry, I couldn't process that.")
                 run_status = response_data.get('run_status', 'failed')
-                
-                # We do not return an error here; we gracefully handled it.
             except Exception as retry_e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.exception("Failed to retry sending message to Azure Agent")
                 ai_response_text = f"An error occurred connecting to the AI Agent (Retry failed): {str(retry_e)}"
                 run_status = 'error'
         else:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.exception("Error occurred connecting to the AI Agent")
             ai_response_text = f"An error occurred connecting to the AI Agent: {error_str}"
             run_status = 'error'
-
-    # (Logic to check if agent called the `create_triage_record` tool internally 
-    # would ideally belong here to formally end the chat session, but for now 
-    # we just act as a pass-through proxy.)
 
     return JsonResponse({
         'status': 'success',
@@ -331,13 +300,53 @@ def api_chat(request):
         'run_status': run_status
     })
 
+
+# ──────────────────────────────────────────────
+# Async helpers
+# ──────────────────────────────────────────────
+
+def _get_session_by_thread(thread_id):
+    """Sync ORM helper: fetch most recent TriageSession for a thread."""
+    return TriageSession.objects.filter(
+        thread_id=thread_id
+    ).order_by('-created_at').first()
+
+
+def _get_user_data(user):
+    """
+    Sync helper: resolve user + patient profile into a plain dict.
+    Must be called via sync_to_async because it touches the ORM/lazy objects.
+    Returns (is_authenticated, user_data_dict_or_None).
+    """
+    # Force evaluation of the lazy user object inside a sync context
+    if not user.is_authenticated:
+        return False, None
+
+    patient = getattr(user, 'patient_profile', None)
+    if patient:
+        return True, {
+            'first_name': patient.first_name or user.first_name,
+            'last_name': patient.last_name or user.last_name,
+            'email': patient.email or user.email,
+        }
+    return True, {
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'email': user.email,
+    }
+
+
+def _set_session_key(django_session, key, value):
+    """Sync helper: write a key into the Django session (DB-backed, sync only)."""
+    django_session[key] = value
+
+
 @csrf_exempt
 @require_POST
 async def api_chat_stream(request):
     """Receive a chat message and return a StreamingHttpResponse with SSE chunked data."""
     import asyncio
-    import logging
-    logger = logging.getLogger(__name__)
+    from django.http import StreamingHttpResponse
 
     try:
         data = json.loads(request.body)
@@ -350,54 +359,77 @@ async def api_chat_stream(request):
     if not user_message or not thread_id:
         return JsonResponse({'error': 'Missing message or thread_id'}, status=400)
 
+    # ── FIX 1 & 2: Resolve user + patient data safely in a sync thread ──
+    # request.user is a SimpleLazyObject that hits the DB on first access.
+    # Calling it directly in async context causes SynchronousOnlyOperation.
+    is_authenticated, user_data = await sync_to_async(_get_user_data)(request.user)
+
+    # ── FIX 3: ORM query correctly wrapped as a callable lambda ──
+    session = await sync_to_async(_get_session_by_thread)(thread_id)
+
     role = "intake"
     session_id = None
-    session = await sync_to_async(TriageSession.objects.filter(thread_id=thread_id).order_by('-created_at').first)()
     if session:
         role = session.active_agent_role
         session_id = session.id
+        # Attach rolling summary if available
+        if is_authenticated and user_data and session.ai_summary:
+            user_data['rolling_summary'] = session.ai_summary
 
     context_msg = f"[Context: session_id={session_id}]\n{user_message}" if session_id else user_message
 
-    from django.http import StreamingHttpResponse
-
-    # Personalization — fetch patient data
-    user_data = None
-    if request.user.is_authenticated:
-        patient = getattr(request.user, 'patient_profile', None)
-        if patient:
-            user_data = {
-                'first_name': patient.first_name or request.user.first_name,
-                'last_name': patient.last_name or request.user.last_name,
-                'email': patient.email or request.user.email
-            }
-        else:
-            user_data = {
-                'first_name': request.user.first_name,
-                'last_name': request.user.last_name,
-                'email': request.user.email
-            }
-        if session and session.ai_summary:
-            user_data['rolling_summary'] = session.ai_summary
-
     async def _async_stream(sync_gen, sess):
-        """Consume sync generator in thread pool, yielding SSE chunks."""
-        full_content = ""
+        """
+        Consume a sync generator safely by running it entirely on one background
+        thread and piping chunks through a queue.
+
+        The Azure SDK's create_stream() uses a `with` context manager that must
+        stay open for the lifetime of the generator. Calling next() repeatedly
+        via run_in_executor() is unsafe because each call may use a different
+        thread, breaking the context manager's internal state and causing the
+        stream to appear empty. Running the whole generator on ONE thread avoids
+        this entirely.
+        """
+        import queue as queue_module
+
+        chunk_queue = queue_module.Queue()
+        _DONE = object()
+        _ERROR = object()
+
+        def _drain_generator():
+            """Run entirely on a single background thread."""
+            try:
+                for chunk in sync_gen:
+                    chunk_queue.put(chunk)
+            except Exception as exc:
+                chunk_queue.put((_ERROR, exc))
+            finally:
+                chunk_queue.put(_DONE)
+
         loop = asyncio.get_running_loop()
-        it = iter(sync_gen)
-        _SENTINEL = object()
+        # Submit the drainer to the executor — it runs start-to-finish on one thread
+        drain_future = loop.run_in_executor(None, _drain_generator)
+
+        full_content = ""
 
         while True:
+            # Poll the queue without blocking the event loop
             try:
-                chunk = await loop.run_in_executor(None, next, it, _SENTINEL)
-            except Exception as exc:
-                logger.exception("Error reading stream chunk")
+                item = chunk_queue.get_nowait()
+            except queue_module.Empty:
+                await asyncio.sleep(0.01)
+                continue
+
+            if item is _DONE:
+                break
+
+            if isinstance(item, tuple) and len(item) == 2 and item[0] is _ERROR:
+                _, exc = item
+                logger.exception("Error reading stream chunk: %s", exc)
                 yield json.dumps({"type": "error", "content": str(exc)}) + "\n\n"
                 break
 
-            if chunk is _SENTINEL:
-                break
-
+            chunk = item
             try:
                 parsed = json.loads(chunk.strip())
                 if parsed.get('type') == 'chunk':
@@ -407,13 +439,18 @@ async def api_chat_stream(request):
 
             yield chunk
 
+        # Ensure the background thread finishes cleanly
+        await drain_future
+
         # Persist full agent response and trigger summary if needed
         if sess and full_content:
             try:
                 await sync_to_async(ChatMessage.objects.create)(
                     session=sess, role='agent', content=full_content
                 )
-                msg_count = await sync_to_async(ChatMessage.objects.filter(session=sess).count)()
+                msg_count = await sync_to_async(
+                    lambda: ChatMessage.objects.filter(session=sess).count()
+                )()
                 if msg_count > 0 and msg_count % 5 == 0:
                     threading.Thread(
                         target=_update_rolling_summary, args=(sess.id, thread_id), daemon=True
@@ -453,21 +490,26 @@ async def api_chat_stream(request):
             try:
                 logger.warning("Stale/locked thread detected. Creating a new thread.")
                 new_thread_id = await asyncio.to_thread(create_thread)
-                request.session['triage_thread_id'] = new_thread_id
+
+                # ── FIX 5: Session write must happen in sync context ──
+                await sync_to_async(_set_session_key)(
+                    request.session, 'triage_thread_id', new_thread_id
+                )
+
                 generator = send_message_stream(
                     new_thread_id, context_msg, role="intake", user_data=user_data
                 )
                 return _make_sse_response(generator, session)
             except Exception as retry_e:
                 logger.exception("Failed to retry sending message stream to Azure Agent")
-
-                retry_error = f"Retry failed: {str(retry_e)}"
-                return _make_sse_response(_single_error_event(retry_error), session)
+                return _make_sse_response(
+                    _single_error_event(f"Retry failed: {str(retry_e)}"), session
+                )
         else:
             logger.exception("Error occurred connecting stream to the AI Agent")
-
-            stream_error = f"Error: {error_str}"
-            return _make_sse_response(_single_error_event(stream_error), session)
+            return _make_sse_response(
+                _single_error_event(f"Error: {error_str}"), session
+            )
 
 
 # ──────────────────────────────────────────────
@@ -536,32 +578,25 @@ def doctor_action(request, session_id):
 
     if action == 'accept':
         session.status = 'IN_PROGRESS'
-
         if hasattr(request.user, 'doctor_profile'):
             session.doctor = request.user.doctor_profile
-
         session.agent_logs += f"\n[Doctor] Case accepted by {request.user}"
         session.save()
-
 
     elif action == 'escalate':
         session.status = 'ESCALATED'
         session.urgency_score = min(session.urgency_score + 1, 5)
-
         session.agent_logs += f"\n[Doctor] Case escalated"
         session.save()
-
 
     elif action == 'complete':
         session.status = 'COMPLETED'
         session.agent_logs += f"\n[Doctor] Case completed"
         session.save()
 
-
     elif action == 'request_vitals':
         session.agent_logs += f"\n[Doctor] Requested vitals"
         session.save()
-
 
     sessions = get_ordered_doctor_queue()
     stats = get_doctor_stats()
@@ -574,12 +609,9 @@ def doctor_action(request, session_id):
     
 @require_POST
 def toggle_availability(request):
-
     doctor = request.user.doctor_profile
-
     doctor.is_available = not doctor.is_available
     doctor.save()
-
     return render(
         request,
         "triage/partials/doctor_availability.html",
@@ -588,38 +620,26 @@ def toggle_availability(request):
     
 def reassign_session(request, session_id):
     """Open the reassign modal"""
-
     session = get_object_or_404(TriageSession, id=session_id)
-
     doctors = Doctor.objects.filter(is_available=True)
-
     return render(
         request,
         "triage/partials/reassign_modal.html",
-        {
-            "session": session,
-            "doctors": doctors
-        }
+        {"session": session, "doctors": doctors}
     )
 
 
 @require_POST
 def confirm_reassign(request, session_id):
     """Handle reassignment"""
-
     session = get_object_or_404(TriageSession, id=session_id)
-
     doctor_id = request.POST.get("doctor")
-
     doctor = get_object_or_404(Doctor, id=doctor_id)
-
     session.doctor = doctor
     session.agent_logs += f"\n[System] Case reassigned to {doctor.user}"
     session.save()
-
     sessions = get_ordered_doctor_queue()
     stats = get_doctor_stats()
-
     return render(
         request,
         "triage/partials/doctor_queue_rows.html",
@@ -627,11 +647,7 @@ def confirm_reassign(request, session_id):
     )
     
 def doctor_notifications(request):
-
-    pending = TriageSession.objects.filter(
-        status='PENDING'
-    ).count()
-
+    pending = TriageSession.objects.filter(status='PENDING').count()
     return render(
         request,
         "triage/partials/notification_badge.html",
@@ -646,7 +662,6 @@ def doctor_notifications(request):
 @login_required
 def api_chat_history(request, thread_id):
     """Fetch all previous messages for a specific thread, potentially across sessions."""
-    # Query messages by thread_id through the session association
     chat_messages = ChatMessage.objects.filter(
         session__thread_id=thread_id
     ).select_related('session').order_by('timestamp')

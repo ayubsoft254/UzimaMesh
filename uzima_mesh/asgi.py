@@ -21,7 +21,14 @@ try:
         handle_sse, sse = original_patch(*args, **kwargs)
 
         async def wrapped_handle_sse(request):
-            await handle_sse(request)
+            try:
+                await handle_sse(request)
+            except BaseException as e:
+                if type(e).__name__ in ('ExceptionGroup', 'BaseExceptionGroup', 'EndOfStream'):
+                    # Client disconnected or SSE closed prematurely
+                    pass
+                else:
+                    raise
             return Response()  # Fix TypeError: 'NoneType' object is not callable
 
         return wrapped_handle_sse, sse

@@ -3,13 +3,16 @@ import logging
 import time
 import os
 import threading
+import asyncio
 import concurrent.futures
+import inspect
 from typing import Dict, Any, Generator
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousOperation
 
 from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import MessageRole
 from azure.core.exceptions import ServiceResponseTimeoutError
 from azure.identity import DefaultAzureCredential
 
@@ -20,6 +23,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _client: "AzureAgentClient | None" = None
 _client_lock = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Event type matching helper
+# ---------------------------------------------------------------------------
+
+def _event_is(event_type, name: str) -> bool:
+    """
+    Match an SSE event type whether it's a plain string or an SDK enum.
+    The Azure SDK may return either 'thread.message.delta' (string) or
+    StreamEventType.THREAD_MESSAGE_DELTA (enum), depending on SDK version.
+    This helper handles both safely.
+    """
+    return str(event_type) == name or getattr(event_type, 'value', None) == name
 
 
 # ---------------------------------------------------------------------------
@@ -43,18 +60,26 @@ class AzureAgentClient:
             "default":      single_agent_id,
         }
 
-        if not all([endpoint, self.agents["intake"]]):
+        if not all([(endpoint or settings.AZURE_AI_PROJECT_CONNECTION_STRING), self.agents["intake"]]):
             raise ValueError(
                 "Missing Azure AI configuration. "
-                "Check AZURE_AI_ENDPOINT and Agent IDs in .env"
+                "Check AZURE_AI_ENDPOINT (or AZURE_AI_PROJECT_CONNECTION_STRING) and Agent IDs in .env"
             )
 
-        conn_str = self._build_connection_string(endpoint)
+        conn_str = settings.AZURE_AI_PROJECT_CONNECTION_STRING or (
+            f"{endpoint.replace('https://', '').rstrip('/')};{sub_id};{rg_name};{project_name}"
+        )
+
         self.client = AIProjectClient.from_connection_string(
-            credential=DefaultAzureCredential(),
+            credential=DefaultAzureCredential(
+                exclude_environment_credential=True,
+                managed_identity_client_id=None,
+            ),
             conn_str=conn_str,
             connection_timeout=30,
-            read_timeout=90,
+            # Increased from 90s — Azure AI Foundry in SA North needs more time
+            # on cold starts and long-running agent runs.
+            read_timeout=300,
         )
 
     # ------------------------------------------------------------------
@@ -98,11 +123,13 @@ class AzureAgentClient:
             except ServiceResponseTimeoutError as exc:
                 if attempt == 2:
                     raise
-                # Exponential backoff with jitter: wait 2s, then 4s, +/- up to 0.5s
                 base_sleep = 2 ** (attempt + 1)
                 jitter = random.uniform(-0.5, 0.5)
                 wait_time = base_sleep + jitter
-                logger.warning("Timeout creating thread, retrying in %.1fs... (attempt %d/3)", wait_time, attempt + 1, exc_info=exc)
+                logger.warning(
+                    "Timeout creating thread, retrying in %.1fs... (attempt %d/3)",
+                    wait_time, attempt + 1, exc_info=exc
+                )
                 time.sleep(wait_time)
 
     def get_agent_id(self, role: str = "intake") -> str | None:
@@ -130,14 +157,17 @@ class AzureAgentClient:
                 f"You ARE talking to {name} (Email: {email}). "
                 "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
                 f"Greet them by saying 'Welcome {first_name} to Uzima Mesh. How are you feeling today?'\n"
-                "IMPORTANT: Ask a MAXIMUM of 3-4 questions about their symptoms. After that, STOP asking questions and provide a preliminary triage assessment directly."
+                "IMPORTANT: Ask a MAXIMUM of 3-4 questions about their symptoms. "
+                "After that, STOP asking questions and provide a preliminary triage assessment directly."
             )
         else:
             instructions = (
                 f"You ARE talking to {name} (Email: {email}). "
                 "THEY ARE ALREADY LOGGED IN. DO NOT ASK FOR THEIR NAME, EMAIL, OR IDENTITY. "
-                "Do NOT greet the user, they have been transferred to you. Continue the triage process smoothly.\n"
-                "IMPORTANT: Limit your questioning. Once you have a sufficient understanding, do not ask further questions and proceed with the assessment."
+                "Do NOT greet the user, they have been transferred to you. "
+                "Continue the triage process smoothly.\n"
+                "IMPORTANT: Limit your questioning. Once you have a sufficient understanding, "
+                "do not ask further questions and proceed with the assessment."
             )
 
         rolling_summary = user_data.get("rolling_summary")
@@ -152,7 +182,7 @@ class AzureAgentClient:
 
     @staticmethod
     def _build_context_message(thread_id: str, message: str, user_data: dict | None) -> str:
-        """Inject identity and thread context into the user message (single construction)."""
+        """Inject identity and thread context into the user message."""
         if user_data:
             name = (
                 f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip()
@@ -164,12 +194,21 @@ class AzureAgentClient:
         return f"[System Context: thread_id={thread_id}]\n{message}"
 
     # ------------------------------------------------------------------
-    # Tool execution (shared between streaming and non-streaming paths)
+    # Tool execution — async-safe
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _execute_tool(tool_call) -> dict:
-        from mcp_server.server import (  # local import to avoid circular deps
+    async def _execute_tool_async(tool_call) -> dict:
+        """
+        Async-safe tool executor.
+
+        All tools in server.py are async coroutines. Calling them via
+        async_to_sync() from within a running event loop (Uvicorn/ASGI)
+        causes a deadlock because async_to_sync tries to reuse the same
+        event loop that's already busy. Instead we await async tools
+        directly, and run any sync tools in a thread executor.
+        """
+        from mcp_server.server import (
             create_triage_record,
             handoff_to_agent,
             consult_agent,
@@ -182,31 +221,28 @@ class AzureAgentClient:
         except json.JSONDecodeError:
             args = {}
 
-        try:
-            import inspect
-            from asgiref.sync import async_to_sync
+        tool_map = {
+            "create_triage_record": create_triage_record,
+            "handoff_to_agent": handoff_to_agent,
+            "consult_agent": consult_agent,
+            "get_doctor_availability": get_doctor_availability,
+        }
 
-            async def await_res(res):
-                return await res
-
-            def run_sync(tool_func, **kw):
-                res = tool_func(**kw)
-                if inspect.isawaitable(res):
-                    return async_to_sync(await_res)(res)
-                return res
-
-            if func_name == "create_triage_record":
-                output = run_sync(create_triage_record, **args)
-            elif func_name == "handoff_to_agent":
-                output = run_sync(handoff_to_agent, **args)
-            elif func_name == "consult_agent":
-                output = run_sync(consult_agent, **args)
-            elif func_name == "get_doctor_availability":
-                output = run_sync(get_doctor_availability, **args)
-            else:
-                output = {"error": f"Unknown tool: {func_name}"}
-        except Exception as exc:
-            output = {"error": str(exc)}
+        tool_func = tool_map.get(func_name)
+        if tool_func is None:
+            output = {"error": f"Unknown tool: {func_name}"}
+        else:
+            try:
+                if inspect.iscoroutinefunction(tool_func):
+                    # Async tool — await directly, no event loop conflict
+                    output = await tool_func(**args)
+                else:
+                    # Sync tool — run in thread executor to avoid blocking
+                    loop = asyncio.get_running_loop()
+                    output = await loop.run_in_executor(None, lambda: tool_func(**args))
+            except Exception as exc:
+                logger.exception("Tool %s raised an exception", func_name)
+                output = {"error": str(exc)}
 
         try:
             output_str = json.dumps(output)
@@ -215,10 +251,35 @@ class AzureAgentClient:
 
         return {"tool_call_id": tool_call.id, "output": output_str}
 
-    def _run_tools_parallel(self, tool_calls) -> list:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(self._execute_tool, tc) for tc in tool_calls]
-            return [f.result() for f in concurrent.futures.as_completed(futures)]
+    @classmethod
+    async def _run_tools_async(cls, tool_calls) -> list:
+        """Run all tool calls concurrently via asyncio.gather."""
+        results = await asyncio.gather(
+            *[cls._execute_tool_async(tc) for tc in tool_calls],
+            return_exceptions=False,
+        )
+        return list(results)
+
+    def _run_tools_sync_from_generator(self, tool_calls) -> list:
+        """
+        Called from the sync stream_generator. Runs async tools safely by
+        submitting them to a brand-new event loop in a dedicated thread.
+
+        This avoids the deadlock that occurs when async_to_sync() is called
+        from within a running Uvicorn event loop — it gets its own isolated
+        loop that has no conflict with the parent async context.
+        """
+        def run_in_new_loop():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(self._run_tools_async(tool_calls))
+            finally:
+                loop.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_new_loop)
+            return future.result(timeout=60)
 
     # ------------------------------------------------------------------
     # Non-streaming send
@@ -236,6 +297,8 @@ class AzureAgentClient:
         additional_instructions = self._build_additional_instructions(role, user_data)
         context_message = self._build_context_message(thread_id, message, user_data)
 
+        logger.info("send_message: thread_id=%s, role=%s, agent_id=%s", thread_id, role, agent_id)
+
         self.client.agents.create_message(
             thread_id=thread_id,
             role="user",
@@ -244,16 +307,19 @@ class AzureAgentClient:
 
         run = self.client.agents.create_run(
             thread_id=thread_id,
-            assistant_id=agent_id,
+            agent_id=agent_id,
             additional_instructions=additional_instructions,
             max_completion_tokens=10000,
             truncation_strategy={"type": "last_messages", "last_messages": 10},
         )
+        logger.info("send_message: Run created: run_id=%s, status=%s", run.id, run.status)
 
         start_time = time.time()
-        POLL_TIMEOUT = 60  # seconds
+        POLL_TIMEOUT = 120
+        poll_count = 0
 
         while True:
+            poll_count += 1
             if run.status in ("queued", "in_progress"):
                 if time.time() - start_time > POLL_TIMEOUT:
                     logger.warning(
@@ -271,20 +337,27 @@ class AzureAgentClient:
                     }
                 time.sleep(0.5)
                 run = self.client.agents.get_run(thread_id=thread_id, run_id=run.id)
+                logger.debug("send_message: Poll #%d - status=%s", poll_count, run.status)
 
             elif run.status == "requires_action":
-                start_time = time.time()  # reset so tool execution doesn't eat poll time
+                start_time = time.time()
+                logger.info("send_message: Run requires_action - processing tools")
 
                 if not (
                     hasattr(run, "required_action")
                     and hasattr(run.required_action, "submit_tool_outputs")
                 ):
+                    logger.warning("send_message: requires_action but no submit_tool_outputs")
                     break
 
                 tool_calls = run.required_action.submit_tool_outputs.tool_calls
-                tool_outputs = self._run_tools_parallel(tool_calls)
+                logger.info("send_message: Found %d tool call(s)", len(tool_calls))
+
+                # Use the new async-safe executor
+                tool_outputs = self._run_tools_sync_from_generator(tool_calls)
 
                 if not tool_outputs:
+                    logger.warning("send_message: No tool outputs generated")
                     break
 
                 run = self.client.agents.submit_tool_outputs_to_run(
@@ -299,8 +372,9 @@ class AzureAgentClient:
                     if tc.function.name == "handoff_to_agent":
                         try:
                             handoff_target = json.loads(tc.function.arguments).get("target_role")
-                        except (json.JSONDecodeError, KeyError):
-                            pass
+                            logger.info("send_message: Handoff detected to role=%s", handoff_target)
+                        except (json.JSONDecodeError, KeyError) as exc:
+                            logger.warning("send_message: Failed to parse handoff args: %s", exc)
                         break
 
                 if handoff_target:
@@ -322,7 +396,7 @@ class AzureAgentClient:
                     )
                     run = self.client.agents.create_run(
                         thread_id=thread_id,
-                        assistant_id=new_agent_id,
+                        agent_id=new_agent_id,
                         additional_instructions=(
                             "You ARE talking to the user. THEY ARE ALREADY LOGGED IN. "
                             "Do NOT greet the user, they have been transferred to you. "
@@ -331,30 +405,62 @@ class AzureAgentClient:
                         max_completion_tokens=10000,
                         truncation_strategy={"type": "last_messages", "last_messages": 10},
                     )
+                    logger.info("send_message: Handoff run created: run_id=%s", run.id)
                     role = handoff_target
-                    start_time = time.time()  # reset for new run
+                    start_time = time.time()
 
             else:
                 break
 
         # Retrieve the latest assistant message
-        messages = self.client.agents.list_messages(thread_id=thread_id)
-        content = ""
-        for msg in messages.data:
-            if msg.role == "assistant":
-                for block in getattr(msg, "content", []):
-                    if hasattr(block, 'text') and hasattr(block.text, 'value'):
-                        content += block.text.value
-                    elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
-                        content += block.text.value if hasattr(block.text, 'value') else getattr(block.text, 'value', str(block.text))
-                    elif isinstance(block, dict):
-                        text_val = block.get('text', {}).get('value', '') if isinstance(block.get('text'), dict) else block.get('text', '')
-                        if text_val:
-                            content += text_val
-                break
+        try:
+            messages = self.client.agents.list_messages(thread_id=thread_id)
+            text_content = messages.get_last_text_message_by_role(MessageRole.AGENT)
+
+            if text_content is None:
+                logger.warning(
+                    "No text message found for agent in thread %s. Attempting fallback...",
+                    thread_id
+                )
+                all_messages = list(messages)
+                content = ""
+                if all_messages:
+                    for msg in reversed(all_messages):
+                        if hasattr(msg, 'content') and msg.content:
+                            for block in msg.content:
+                                if hasattr(block, 'text') and hasattr(block.text, 'value'):
+                                    content = block.text.value
+                                    break
+                        if content:
+                            break
+                if not content:
+                    logger.error(
+                        "Unable to extract any message content from thread %s. run_status=%s",
+                        thread_id, run.status
+                    )
+                    content = "I apologize, but I was unable to generate a response."
+            else:
+                if hasattr(text_content, 'text') and hasattr(text_content.text, 'value'):
+                    content = text_content.text.value
+                else:
+                    logger.warning(
+                        "text_content found but structure unexpected for thread %s. type=%s",
+                        thread_id, type(text_content)
+                    )
+                    content = "I apologize, but I was unable to generate a response."
+
+        except Exception as exc:
+            logger.exception("Error retrieving agent message from thread %s", thread_id)
+            content = "I apologize, but an error occurred while processing your request."
+
+        final_content = content or "I apologize, but I was unable to generate a response."
+        logger.info(
+            "send_message: Completed thread=%s role=%s run_status=%s content_len=%d",
+            thread_id, role, run.status, len(final_content)
+        )
 
         return {
-            "content": content or "No response",
+            "content": final_content,
             "run_status": run.status,
             "agent_role": role,
         }
@@ -381,43 +487,52 @@ class AzureAgentClient:
                 role="user",
                 content=context_message,
             )
-        except ServiceResponseTimeoutError as exc:
-            logger.warning(
-                "Timeout adding message to thread %s (cold-start?): %s", thread_id, exc
-            )
+        except Exception as exc:
+            # Catch both ServiceResponseTimeoutError and raw connection timeouts
+            exc_str = str(exc).lower()
+            if "timeout" in exc_str or "timed out" in exc_str:
+                logger.warning(
+                    "Timeout adding message to thread %s (cold-start?): %s", thread_id, exc
+                )
+                def _timeout_gen():
+                    yield json.dumps({
+                        "type": "error",
+                        "content": (
+                            "The AI service took too long to respond. "
+                            "Please wait a moment and try again."
+                        ),
+                    }) + "\n\n"
+                return _timeout_gen()
 
-            def _timeout_gen():
-                yield json.dumps({
-                    "type": "error",
-                    "content": (
-                        "The AI service took too long to respond. "
-                        "Please wait a moment and try again."
-                    ),
-                }) + "\n\n"
+            elif isinstance(exc, SuspiciousOperation):
+                logger.error("Disallowed host blocked during stream setup: %s", exc)
+                def _host_error_gen():
+                    yield json.dumps({
+                        "type": "error",
+                        "content": "Request blocked: disallowed host.",
+                    }) + "\n\n"
+                return _host_error_gen()
 
-            return _timeout_gen()
-
-        except SuspiciousOperation as exc:
-            logger.error("Disallowed host blocked during stream setup: %s", exc)
-
-            def _host_error_gen():
-                yield json.dumps({
-                    "type": "error",
-                    "content": "Request blocked: disallowed host.",
-                }) + "\n\n"
-
-            return _host_error_gen()
+            else:
+                raise
 
         def stream_generator():
             try:
                 def process_stream(current_stream, depth: int = 0):
-                    """Recursively process a stream, handling tool calls and handoffs.
+                    """
+                    Recursively process a stream, handling tool calls and handoffs.
 
                     depth cap:
                       0 -> initial run
                       1 -> tool-output re-stream
                       2 -> handoff agent stream
                       3 -> safety cap (return immediately)
+
+                    FIX: All event type comparisons now use _event_is() which handles
+                    both plain string event types AND SDK enum values (e.g.
+                    StreamEventType.THREAD_MESSAGE_DELTA). Previously, string equality
+                    checks silently failed against enum values, causing zero chunks to
+                    be yielded even though the stream was running correctly.
                     """
                     if depth > 3:
                         return
@@ -426,37 +541,67 @@ class AzureAgentClient:
                     tool_calls_seen = []
 
                     for event_item in current_stream:
-                        event_type = getattr(event_item, "event", getattr(event_item, "type", type(event_item).__name__))
+                        event_type = getattr(
+                            event_item, "event",
+                            getattr(event_item, "type", type(event_item).__name__)
+                        )
                         event_data = getattr(event_item, "data", event_item)
 
-                        if event_type == "thread.run.created" or "RunCreated" in type(event_data).__name__:
+                        if (
+                            _event_is(event_type, "thread.run.created")
+                            or "RunCreated" in type(event_data).__name__
+                        ):
                             run_id = getattr(event_data, "id", None)
 
-                        elif event_type == "thread.message.delta" or "MessageDelta" in type(event_data).__name__:
+                        elif (
+                            _event_is(event_type, "thread.message.delta")
+                            or "MessageDelta" in type(event_data).__name__
+                        ):
                             delta_obj = getattr(event_data, "delta", event_data)
                             for block in getattr(delta_obj, "content", []):
+                                text_val = None
+
                                 if hasattr(block, 'text') and hasattr(block.text, 'value'):
                                     text_val = block.text.value
-                                    yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
-                                elif hasattr(block, 'type') and getattr(block, 'type') == 'text' and hasattr(block, 'text'):
-                                    text_val = block.text.value if hasattr(block.text, 'value') else getattr(block.text, 'value', str(block.text))
-                                    yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+                                elif (
+                                    hasattr(block, 'type')
+                                    and getattr(block, 'type') == 'text'
+                                    and hasattr(block, 'text')
+                                ):
+                                    text_val = getattr(block.text, 'value', str(block.text))
                                 elif isinstance(block, dict):
-                                    text_val = block.get('text', {}).get('value', '') if isinstance(block.get('text'), dict) else block.get('text', '')
-                                    if text_val:
-                                        yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+                                    text_obj = block.get('text', {})
+                                    text_val = (
+                                        text_obj.get('value', '')
+                                        if isinstance(text_obj, dict)
+                                        else text_obj
+                                    ) or ''
                                 else:
-                                    logger.debug("Unknown block type in delta: %s", block)
+                                    logger.debug("Unknown block type in delta: %s", type(block))
 
-                        elif event_type == "thread.run.requires_action" or "RequiresAction" in type(event_data).__name__:
+                                if text_val:
+                                    yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
+
+                        elif (
+                            _event_is(event_type, "thread.run.requires_action")
+                            or "RequiresAction" in type(event_data).__name__
+                        ):
                             if hasattr(event_data, "id"):
                                 run_id = event_data.id
-                            if hasattr(event_data, "required_action") and hasattr(event_data.required_action, "submit_tool_outputs"):
-                                tool_calls_seen = list(event_data.required_action.submit_tool_outputs.tool_calls)
+                            if (
+                                hasattr(event_data, "required_action")
+                                and hasattr(event_data.required_action, "submit_tool_outputs")
+                            ):
+                                tool_calls_seen = list(
+                                    event_data.required_action.submit_tool_outputs.tool_calls
+                                )
 
                     # ---- Post-stream: execute tools ----
                     if tool_calls_seen and run_id:
-                        tool_outputs = self._run_tools_parallel(tool_calls_seen)
+                        # FIX: Use _run_tools_sync_from_generator which spins up a fresh
+                        # event loop in a dedicated thread. This avoids the deadlock caused
+                        # by async_to_sync() trying to reuse the already-running Uvicorn loop.
+                        tool_outputs = self._run_tools_sync_from_generator(tool_calls_seen)
 
                         if tool_outputs:
                             with self.client.agents.submit_tool_outputs_to_stream(
@@ -494,7 +639,7 @@ class AzureAgentClient:
                                                 )
                                                 with self.client.agents.create_stream(
                                                     thread_id=thread_id,
-                                                    assistant_id=new_agent_id,
+                                                    agent_id=new_agent_id,
                                                     additional_instructions=(
                                                         "You ARE talking to the user. "
                                                         "THEY ARE ALREADY LOGGED IN. "
@@ -516,7 +661,7 @@ class AzureAgentClient:
 
                 with self.client.agents.create_stream(
                     thread_id=thread_id,
-                    assistant_id=agent_id,
+                    agent_id=agent_id,
                     additional_instructions=additional_instructions,
                     max_completion_tokens=10000,
                     truncation_strategy={"type": "last_messages", "last_messages": 10},
@@ -528,7 +673,9 @@ class AzureAgentClient:
 
             except SuspiciousOperation as exc:
                 logger.error("Disallowed host in stream: %s", exc)
-                yield json.dumps({"type": "error", "content": "Request blocked: disallowed host."}) + "\n\n"
+                yield json.dumps({
+                    "type": "error", "content": "Request blocked: disallowed host."
+                }) + "\n\n"
             except Exception as exc:
                 logger.exception("Failed to execute stream for thread %s", thread_id)
                 yield json.dumps({"type": "error", "content": str(exc)}) + "\n\n"
@@ -544,7 +691,7 @@ def get_project_client() -> AzureAgentClient:
     global _client
     if _client is None:
         with _client_lock:
-            if _client is None:  # double-checked locking
+            if _client is None:
                 _client = AzureAgentClient()
     return _client
 
