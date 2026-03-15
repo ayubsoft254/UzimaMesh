@@ -11,6 +11,20 @@ import json
 
 
 # ──────────────────────────────────────────────
+# Health / Warmup Probe
+# ──────────────────────────────────────────────
+
+def health_check(request):
+    """
+    Lightweight endpoint used as WEBSITE_WARMUP_PATH for Azure App Service.
+    Returns 200 immediately — no DB, no auth, no template rendering.
+    This prevents the warmup probe from timing out while waiting for a DB-heavy
+    page to load during cold starts.
+    """
+    return HttpResponse("ok", content_type="text/plain")
+
+
+# ──────────────────────────────────────────────
 # Landing Page & Dashboard Router
 # ──────────────────────────────────────────────
 
