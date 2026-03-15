@@ -550,6 +550,8 @@ class AzureAgentClient:
 
         def stream_generator():
             try:
+                streamed_text_parts = []
+
                 def process_stream(current_stream, depth: int = 0):
                     """
                     Recursively process a stream, handling tool calls and handoffs.
@@ -612,6 +614,7 @@ class AzureAgentClient:
                                     logger.debug("Unknown block type in delta: %s", type(block))
 
                                 if text_val:
+                                    streamed_text_parts.append(text_val)
                                     yield json.dumps({"type": "chunk", "content": text_val}) + "\n\n"
 
                         elif (
@@ -699,6 +702,26 @@ class AzureAgentClient:
                     truncation_strategy={"type": "last_messages", "last_messages": 10},
                 ) as initial_stream:
                     yield from process_stream(initial_stream, depth=0)
+
+                if not ''.join(streamed_text_parts).strip():
+                    logger.warning(
+                        "Stream completed without text deltas. Falling back to last agent message. thread=%s",
+                        thread_id,
+                    )
+                    fallback_text = ""
+                    try:
+                        messages = self.client.agents.list_messages(thread_id=thread_id)
+                        text_content = messages.get_last_text_message_by_role(MessageRole.AGENT)
+                        if text_content and hasattr(text_content, 'text') and hasattr(text_content.text, 'value'):
+                            fallback_text = text_content.text.value or ""
+                    except Exception:
+                        logger.exception("Failed to fetch fallback agent text for thread %s", thread_id)
+
+                    final_fallback = fallback_text.strip() or (
+                        "I apologize, but I was unable to generate a response. Please try again."
+                    )
+                    streamed_text_parts.append(final_fallback)
+                    yield json.dumps({"type": "chunk", "content": final_fallback}) + "\n\n"
 
                 # Emit done exactly once after everything finishes
                 yield json.dumps({"type": "done", "run_status": "completed"}) + "\n\n"

@@ -186,6 +186,10 @@
     }
 
     function addMessage(content, role) {
+        if (!content || !String(content).trim()) {
+            return;
+        }
+
         const isAgent = role === 'agent';
         const wrapper = document.createElement('div');
         wrapper.className = `flex ${isAgent ? 'justify-start msg-agent' : 'justify-end msg-patient'}`;
@@ -291,7 +295,7 @@
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            const contentEl = createStreamingBubble();
+            let contentEl = null;
             let fullText = "";
 
             // BUG 3 FIX: Use a buffer to accumulate TCP chunks.
@@ -314,10 +318,21 @@
                         try {
                             const data = JSON.parse(block);
                             if (data.type === 'chunk') {
-                                fullText += data.content;
+                                const piece = String(data.content || '');
+                                // Ignore pure-whitespace prelude chunks to avoid empty bubbles.
+                                if (!fullText && !piece.trim()) {
+                                    continue;
+                                }
+                                if (!contentEl) {
+                                    contentEl = createStreamingBubble();
+                                }
+                                fullText += piece;
                                 contentEl.innerHTML = renderText(fullText);
                                 chatMessages.scrollTop = chatMessages.scrollHeight;
                             } else if (data.type === 'error') {
+                                if (!contentEl) {
+                                    contentEl = createStreamingBubble();
+                                }
                                 contentEl.innerHTML += `<br><span class='text-red-400'>[Error: ${data.content}]</span>`;
                             }
                             // 'done' type: stream complete, nothing extra to do
