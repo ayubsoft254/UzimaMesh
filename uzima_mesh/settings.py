@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     # Local apps
     'triage',
     'django_mcp',
+    'mcp_server',
 ]
 
 MIDDLEWARE = [
@@ -83,9 +84,32 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'uzima_mesh.urls'
 
-# Session settings (15 minutes of inactivity timeout)
-SESSION_COOKIE_AGE = 15 * 60  
-SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+# Session settings
+# Keep sessions alive long enough for long-running MCP conversations.
+SESSION_COOKIE_AGE = int(os.getenv('SESSION_COOKIE_AGE', str(8 * 60 * 60)))
+SESSION_EXPIRE_AT_BROWSER_CLOSE = os.getenv('SESSION_EXPIRE_AT_BROWSER_CLOSE', 'False') == 'True'
+SESSION_SAVE_EVERY_REQUEST = True
+
+# CORS settings for MCP endpoints used by Azure AI Foundry connectors.
+CORS_URLS_REGEX = r'^/mcp(/|$).*'
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'False') == 'True'
+CORS_ALLOWED_ORIGINS = [
+    origin.strip() for origin in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if origin.strip()
+]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    pattern.strip()
+    for pattern in os.getenv(
+        'CORS_ALLOWED_ORIGIN_REGEXES',
+        r'^https://([a-z0-9-]+\.)*azure\.com$,'
+        r'^https://([a-z0-9-]+\.)*azureai\.com$,'
+        r'^https://ai\.azure\.com$'
+    ).split(',')
+    if pattern.strip()
+]
+
+# Keep SSE traffic active for connectors that enforce short idle timeouts.
+MCP_SSE_PING_INTERVAL_SECONDS = int(os.getenv('MCP_SSE_PING_INTERVAL_SECONDS', '5'))
 
 TEMPLATES = [
     {
@@ -257,4 +281,3 @@ LOGGING = {
 MCP_SERVER_TITLE = "UzimaMesh MCP Server"
 MCP_SERVER_INSTRUCTIONS = "Use these tools to triage patients and check doctor availability."
 MCP_SERVER_VERSION = "1.0.0"
-
