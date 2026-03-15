@@ -30,6 +30,7 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.11'
       appCommandLine: './startup.sh'
+      alwaysOn: true
       // Enable HTTP logging so app logs are visible in Log Stream
       httpLoggingEnabled: true
       logsDirectorySizeLimit: 35
@@ -45,9 +46,13 @@ resource webApp 'Microsoft.Web/sites@2022-03-01' = {
         { name: 'AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
         { name: 'AZURE_RESOURCE_GROUP', value: resourceGroup().name }
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
+        // MCP over SSE stores session state in-process; keep single worker unless
+        // you introduce sticky routing/session-store backed transport.
+        { name: 'GUNICORN_WORKERS', value: '1' }
         // Set to 'true' only on first deploy or when you want to reset seed data
         { name: 'SEED_ON_STARTUP', value: 'false' }
         { name: 'WEBSITES_CONTAINER_START_TIME_LIMIT', value: '1800' }
+        { name: 'WEBSITE_WARMUP_PATH', value: '/health/' }
         { name: 'WEBSITE_SWAP_WARMUP_PING_STATUSES', value: '200' }
       ]
     }
