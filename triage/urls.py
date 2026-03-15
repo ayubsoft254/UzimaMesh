@@ -8,6 +8,9 @@ router.register(r'doctors', views.DoctorViewSet)
 router.register(r'sessions', views.TriageSessionViewSet)
 
 urlpatterns = [
+    # Warmup probe — no DB, no auth, always 200
+    path('health/', views.health_check, name='health_check'),
+
     # Public Landing Page
     path('', views.landing_page, name='landing_page'),
 
